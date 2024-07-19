@@ -22,7 +22,7 @@ generate_random_string() {
 
 # Generate the specified number of lines
 for ((i = 0; i < num_lines; i++)); do
-    random_string=$(generate_random_string $((RANDOM % 200 + 1))) # Random length between 1 and 20
+    random_string=$(generate_random_string $((RANDOM % 1000 + 1)))
     echo -ne "$random_string\0\n" >> "$output_file" # Add a null terminator and newline
 done
 
