@@ -9,10 +9,6 @@ template = {
         "gcc-14", 
         "-O3", 
         "-I" + os.popen("brew --prefix simde").read().strip() + "/include", 
-        "-c", 
-        "{{file}}",
-        "-o", 
-        "obj/{{file}}.o"
     ],
     "file": "{{file}}"
 }

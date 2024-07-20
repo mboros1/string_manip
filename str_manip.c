@@ -7,7 +7,7 @@
 #include <string.h>
 #include <time.h>
 
-#define N 10
+#define N 1000
 
 typedef struct results {
   double standard[N];
