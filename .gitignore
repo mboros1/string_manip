@@ -1,5 +1,5 @@
-a.out
-generate_random_strings
 *.txt
 .cache/
 compile_commands.json
+bin/
+obj/
