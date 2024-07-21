@@ -191,7 +191,7 @@ double benchmark_strlen(const char *filename,
     exit(EXIT_FAILURE);
   }
 
-  char buffer[256];
+  char buffer[4096];
   volatile size_t total_length = 0;
   clock_t start = clock();
 

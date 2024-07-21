@@ -14,7 +14,30 @@ output_file=$2
 # Function to generate a random string of a given length
 generate_random_string() {
     local length=$1
-    od -vAn -N"$length" -tu1 /dev/urandom | tr -cd 'a-zA-Z0-9' | head -c "$length"
+    local random_string=""
+    
+    for ((i = 0; i < length; i++)); do
+        # Generate a random number between 0 and 61
+        local rand_num=$(od -An -N1 -i /dev/urandom | tr -d ' ')
+        rand_num=$((rand_num % 62))
+        
+        # Map the number to the appropriate ASCII range
+        if (( rand_num < 10 )); then
+            # Numbers (0-9)
+            rand_num=$(( rand_num + 48 ))
+        elif (( rand_num < 36 )); then
+            # Uppercase letters (A-Z)
+            rand_num=$(( rand_num + 55 ))  # 65 - 10
+        else
+            # Lowercase letters (a-z)
+            rand_num=$(( rand_num + 61 ))  # 97 - 36
+        fi
+        
+        # Convert the random number to its ASCII character equivalent
+        random_string+=$(printf "\\$(printf '%03o' "$rand_num")")
+    done
+
+    echo "$random_string"
 }
 
 # Clear the output file if it exists
