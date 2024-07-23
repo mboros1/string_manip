@@ -10,4 +10,6 @@
 //       what a destructor is, which we don't have. I guess this is good practice because
 //       it's making me think abou this in ways I haven't before.
 
+// TODO: rename to strpool. look into using flywheel pattern
+
 #endif // FAF_STRING_MEM_H
