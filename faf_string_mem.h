@@ -1,15 +1,16 @@
 #ifndef FAF_STRING_MEM_H
+#define FAF_STRING_MEM_H
 
 #include "faf_string.h"
 
+typedef int pool_t;
 
-faf_string* faf_string_alloc(size_t nblocks);
+faf_string* faf_string_alloc(pool_t pool);
 
-void faf_string_free(void* begin, void* end);
+void faf_string_pool_reset(pool_t pool);
 
-faf_string* faf_string_copy(faf_string str);
+pool_t next_pool();
 
-// TODO: maybe an array allocator?
-// TODO: would strings shorter then 128 bits make sense?
+faf_string* faf_string_copy(pool_t pool, faf_string str);
 
 #endif // FAF_STRING_MEM_H
