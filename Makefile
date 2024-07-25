@@ -34,6 +34,11 @@ $(TARGETS): %: $(OBJ_DIR)/%.o
 $(OBJ_DIR)/%.o: $(SRC_DIR)/%.c
 	$(CC) $(CFLAGS) -c $< -o $@
 
+$(BIN_DIR)/test_faf_string: $(OBJ_DIR)/faf_string.o $(OBJ_DIR)/test_faf_string.o $(OBJ_DIR)/faf_string_strlen.o
+	$(CC) $(CFLAGS) $(OBJ_DIR)/faf_string.o $(OBJ_DIR)/test_faf_string.o $(OBJ_DIR)/faf_string_strlen.o -o $@
+
+test: $(BIN_DIR)/test_faf_string
+
 # Clean up
 clean:
 	rm -rf $(OBJ_DIR) $(BIN_DIR)
