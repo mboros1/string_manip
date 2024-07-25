@@ -24,7 +24,7 @@
 #define NPOOLS 12
 #endif
 
-#define BLOCK_LEN 4096
+#define BLOCK_LEN 1024
 
 // TODO: allow someone to allocate more then 1 pool
 // the following pools will have idx -1 to show them as unused.
@@ -49,6 +49,15 @@ pool_t next_pool() {
 }
 
 void faf_string_pool_reset(pool_t pool) { pool_idxs[pool] = 0; }
+
+
+pool_t get_pool_offset(pool_t pool) {
+  return pool_idxs[pool];
+}
+
+pool_t get_pool_remaining(pool_t pool) {
+  return BLOCK_LEN - get_pool_offset(pool);
+}
 
 faf_string *faf_string_alloc(pool_t pool) {
   int idx = pool_idxs[pool]++;

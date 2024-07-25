@@ -5,7 +5,6 @@
 #define FAF_STRING_ASSERT_IMPL
 #include "faf_string_assert.h"
 
-
 #define NDEBUG
 
 // Helper function to print faf_string

@@ -1,6 +1,7 @@
 # Define the compiler and options
 CC = gcc-14
-CFLAGS = -O3 -I$(shell brew --prefix simde)/include/ -flax-vector-conversions
+CFLAGS = -O3 -I$(shell brew --prefix simde)/include/ -flax-vector-conversions -g
+TEST_FLAGS = -O0 -I$(shell brew --prefix simde)/include/ -flax-vector-conversions -g
 
 # Directories
 SRC_DIR = .
@@ -35,9 +36,12 @@ $(OBJ_DIR)/%.o: $(SRC_DIR)/%.c
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(BIN_DIR)/test_faf_string: $(OBJ_DIR)/faf_string.o $(OBJ_DIR)/test_faf_string.o $(OBJ_DIR)/faf_string_strlen.o
-	$(CC) $(CFLAGS) $(OBJ_DIR)/faf_string.o $(OBJ_DIR)/test_faf_string.o $(OBJ_DIR)/faf_string_strlen.o -o $@
+	$(CC) $(TEST_FLAGS) $(OBJ_DIR)/faf_string.o $(OBJ_DIR)/test_faf_string.o $(OBJ_DIR)/faf_string_strlen.o -o $@
 
-test: $(BIN_DIR)/test_faf_string
+$(BIN_DIR)/test_faf_string_mem: $(OBJ_DIR)/faf_string.o $(OBJ_DIR)/faf_string_strlen.o $(OBJ_DIR)/faf_string_mem.o $(OBJ_DIR)/test_faf_string_mem.o
+	$(CC) $(TEST_FLAGS) $(OBJ_DIR)/faf_string.o $(OBJ_DIR)/test_faf_string_mem.o $(OBJ_DIR)/faf_string_mem.o $(OBJ_DIR)/faf_string_strlen.o -o $@ -g
+
+test: $(BIN_DIR)/test_faf_string $(BIN_DIR)/test_faf_string_mem
 
 # Clean up
 clean:
