@@ -26,6 +26,10 @@
 
 #define BLOCK_LEN 4096
 
+// TODO: allow someone to allocate more then 1 pool
+// the following pools will have idx -1 to show them as unused.
+// when the pool is reset, look ahead for -1 values to reset all together
+
 faf_string mempools[NPOOLS * BLOCK_LEN];
 
 pool_t pool_idxs[NPOOLS];
@@ -36,7 +40,7 @@ pool_t next_pool() {
   // look for first pool with its index at 0
   for (int i = 0; i < NPOOLS; ++i) {
     if (pool_idxs[current_pool]) {
-      current_pool == NPOOLS - 1 ? 0 : ++current_pool;
+      current_pool = current_pool == NPOOLS - 1 ? 0 : current_pool + 1;
     } else {
       break;
     }
