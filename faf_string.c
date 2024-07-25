@@ -1,6 +1,5 @@
 #include "faf_string.h"
-
-size_t faf_string_strlen(const char *str);
+#include "faf_string_strlen.h"
 
 faf_string faf_string_init(const char *str) {
   faf_string init = {.start = str, .end = str + faf_string_strlen(str)};

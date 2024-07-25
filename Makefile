@@ -2,8 +2,7 @@
 CC = gcc-14
 CFLAGS = -O3 -I$(shell brew --prefix simde)/include/ -flax-vector-conversions
 
-# Targets and their source files
-TARGETS = generate_random_strings str_split_test str_len_test
+# Directories
 SRC_DIR = .
 OBJ_DIR = obj
 BIN_DIR = bin
@@ -15,8 +14,14 @@ $(BIN_DIR):
 $(OBJ_DIR):
 	mkdir -p $(OBJ_DIR)
 
+# Source files
+SRC_FILES = $(wildcard $(SRC_DIR)/*.c)
+
 # Object files
-OBJS = $(patsubst $(SRC_DIR)/%.c,$(OBJ_DIR)/%.o,$(wildcard $(SRC_DIR)/*.c))
+OBJS = $(patsubst $(SRC_DIR)/%.c,$(OBJ_DIR)/%.o,$(SRC_FILES))
+
+# Targets
+TARGETS = generate_random_strings str_split_test str_len_test
 
 # Default target
 all: $(BIN_DIR) $(OBJ_DIR) $(TARGETS)

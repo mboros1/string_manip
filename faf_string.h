@@ -1,4 +1,5 @@
 #ifndef FAF_STRING_H
+#define FAF_STRING_H
 
 #include <stddef.h>
 #include <simde/x86/sse2.h>
