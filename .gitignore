@@ -3,3 +3,5 @@
 compile_commands.json
 bin/
 obj/
+a.out
+a.out.*
