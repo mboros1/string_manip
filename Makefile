@@ -1,6 +1,6 @@
 # Define the compiler and options
 CC = gcc-14
-CFLAGS = -O3 -I$(shell brew --prefix simde)/include/ -flax-vector-conversions -g
+CFLAGS = -O0 -I$(shell brew --prefix simde)/include/ -flax-vector-conversions -g
 TEST_FLAGS = -O0 -I$(shell brew --prefix simde)/include/ -flax-vector-conversions -g
 
 # Directories

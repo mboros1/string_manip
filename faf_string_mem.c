@@ -50,10 +50,7 @@ pool_t next_pool() {
 
 void faf_string_pool_reset(pool_t pool) { pool_idxs[pool] = 0; }
 
-
-pool_t get_pool_offset(pool_t pool) {
-  return pool_idxs[pool];
-}
+pool_t get_pool_offset(pool_t pool) { return pool_idxs[pool]; }
 
 pool_t get_pool_remaining(pool_t pool) {
   return BLOCK_LEN - get_pool_offset(pool);
@@ -69,12 +66,17 @@ faf_string *faf_string_copy(pool_t pool, faf_string str) {
   faf_string *alloc = faf_string_alloc(pool);
 
   const char *data = str.start;
+  alloc->start = (const char *)&mempools[pool * BLOCK_LEN + pool_idxs[pool]];
   for (; data + 16 <= str.end; data += 16) {
     simde__m128i chars = simde_mm_loadu_si128((const simde__m128 *)data);
     int idx = pool_idxs[pool]++;
     mempools[pool * BLOCK_LEN + idx].data = chars;
   }
   int remaining = str.end - data;
+  alloc->end =
+      (const char
+           *)(((uintptr_t)&mempools[pool * BLOCK_LEN + pool_idxs[pool]]) +
+              remaining);
   if (remaining > 0) {
     int idx = pool_idxs[pool]++;
     char buffer[16] = {0};
