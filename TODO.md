@@ -8,7 +8,7 @@
     * ltrim, rtrim, trim
     * concat
     * strmult(?)
-    * sort, both individual str and arr
+    * sort, both individual str and arr. pdqsort looks really good
     * copy
     * reverse
     * compare
