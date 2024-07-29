@@ -41,7 +41,10 @@ $(BIN_DIR)/test_faf_string: $(OBJ_DIR)/faf_string.o $(OBJ_DIR)/test_faf_string.o
 $(BIN_DIR)/test_faf_string_mem: $(OBJ_DIR)/faf_string.o $(OBJ_DIR)/faf_string_strlen.o $(OBJ_DIR)/faf_string_mem.o $(OBJ_DIR)/test_faf_string_mem.o
 	$(CC) $(TEST_FLAGS) $(OBJ_DIR)/faf_string.o $(OBJ_DIR)/test_faf_string_mem.o $(OBJ_DIR)/faf_string_mem.o $(OBJ_DIR)/faf_string_strlen.o -o $@ -g
 
-test: $(BIN_DIR)/test_faf_string $(BIN_DIR)/test_faf_string_mem
+$(BIN_DIR)/test_faf_string_strsplit: $(OBJ_DIR)/faf_string.o $(OBJ_DIR)/faf_string_strlen.o $(OBJ_DIR)/faf_string_mem.o $(OBJ_DIR)/test_faf_string_mem.o $(OBJDIR)/faf_string_strsplit.o
+	$(CC) $(TEST_FLAGS) $(OBJ_DIR)/faf_string.o $(OBJ_DIR)/test_faf_string_mem.o $(OBJ_DIR)/faf_string_mem.o $(OBJ_DIR)/faf_string_strlen.o $(OBJDIR)/faf_string_strsplit.o -o $@ -g
+
+test: $(BIN_DIR)/test_faf_string $(BIN_DIR)/test_faf_string_mem $(BIN_DIR)/test_faf_string_strsplit
 
 # Clean up
 clean:
