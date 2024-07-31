@@ -35,6 +35,7 @@ const char *str5 = ""; // TODO: string longer then 128 bits
 const char *str6 = ",,asdf,asfasdfg,,,";
 
 int main(void) {
+  test_str1();
 
   if (tests_failed) {
     printf("%d of %d tests failed!\n", tests_failed, tests_run);
