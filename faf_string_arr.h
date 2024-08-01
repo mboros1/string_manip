@@ -10,6 +10,6 @@ typedef struct {
 } faf_string_arr;
 
 #define faf_foreach(pos, arr) \
-  for(faf_string* pos = arr.start; pos != arr.end; ++pos)
+  for(faf_string* pos = arr.start; pos < arr.end; ++pos)
 
 #endif // FAF_STRING_ARR_H

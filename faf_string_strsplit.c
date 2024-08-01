@@ -53,17 +53,30 @@ faf_string_arr faf_string_split(pool_t pool, faf_string str, char tok) {
     }
   }
 
+  // TODO: remainng is not calculated correctly; s does not change in the loop, maybe should be incrementing s instead of idx, or use idx for the calculation
   int remaining = str.end - s;
   if (remaining > 0) {
     char buffer[16] = {0};
     for (int i = 0; i < remaining; ++i) {
       buffer[i] = s[i];
     }
+    simde__m128i chunk = simde_mm_loadu_si128((simde__m128i *)buffer);
+    simde__m128i cmp = simde_mm_cmpeq_epi8(chunk, target_vector);
+    int mask = simde_mm_movemask_epi8(cmp);
+
+    while (mask) {
+      int pos = __builtin_ffs(mask) - 1;
+      tail->end = head->start + idx + pos;
+      tail = faf_string_alloc(pool);
+      tail->start = head->start + idx + pos + 1;
+      mask &= mask - 1;
+    }
   }
+  tail->end = str.end;
 
   faf_string_arr arr = {
-    .start = head,
-    .end = tail,
+      .start = head,
+      .end = tail+1,
   };
   return arr;
 }
