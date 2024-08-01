@@ -1,15 +1,14 @@
-* TODO: strsplit logic looks sound, start testing it
 
 * TODO: define list of functions. just have strlen so far
-    * length
-    * toupper
+    * length - done
+    * toupper 
     * tolower
-    * split
+    * split - done
     * ltrim, rtrim, trim
     * concat
     * strmult(?)
     * sort, both individual str and arr. pdqsort looks really good
-    * copy
+    * copy - done
     * reverse
     * compare
     * hash
