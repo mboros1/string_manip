@@ -53,8 +53,7 @@ faf_string_arr faf_string_split(pool_t pool, faf_string str, char tok) {
     }
   }
 
-  // TODO: remainng is not calculated correctly; s does not change in the loop, maybe should be incrementing s instead of idx, or use idx for the calculation
-  int remaining = str.end - s;
+  int remaining = str.end - (s + idx);
   if (remaining > 0) {
     char buffer[16] = {0};
     for (int i = 0; i < remaining; ++i) {
