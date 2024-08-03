@@ -1,5 +1,5 @@
 
-* TODO: define list of functions. just have strlen so far
+* TODO: define list of functions.
     * length - done
     * toupper 
     * tolower

@@ -57,6 +57,7 @@ faf_string_arr faf_string_split(pool_t pool, faf_string str, char tok) {
   if (remaining > 0) {
     char buffer[16] = {0};
     for (int i = 0; i < remaining; ++i) {
+      // TODO: s[i] looks wrong here? shouldn't it be s[idx+i]?
       buffer[i] = s[i];
     }
     simde__m128i chunk = simde_mm_loadu_si128((simde__m128i *)buffer);
