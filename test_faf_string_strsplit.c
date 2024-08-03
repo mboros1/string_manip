@@ -15,7 +15,6 @@ int tests_run = 0;
 
 char error_str[10 * 1024];
 
-// TODO: implement tests for various strings
 const char *str1 = "hello,world";
 void test_str1() {
   tests_run++;
