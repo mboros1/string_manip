@@ -122,9 +122,6 @@ void test_str5() {
   sprintf(error_str, "Array length incorrect: actual: %d, expected: %d\n", len,
           expected);
   assert(len == expected, error_str);
-  faf_foreach(pos, arr) {
-    printf("%.*s\n", (int)(pos->end - pos->start), pos->start);
-  }
 }
 
 const char *str6 = ",,asdf,asfasdfg,,,";
@@ -143,6 +140,26 @@ void test_str6() {
   assert(len == expected, error_str);
 }
 
+const char *str7 = "1234567890123456,123";
+void test_str7() {
+  tests_run++;
+  printf("Testing string 6...\n");
+  pool_t pool = next_pool();
+  faf_string str = faf_string_init(str7);
+
+  faf_string_arr arr = faf_string_split(pool, str, ',');
+
+  int len = arr.end - arr.start;
+  int expected = 2;
+  sprintf(error_str, "Array length incorrect: actual: %d, expected: %d\n", len,
+          expected);
+  assert(len == expected, error_str);
+
+  // faf_foreach(str, arr) {
+  //   printf("%.*s\n", (int)(str->end - str->start), str->start);
+  // }
+}
+
 int main(void) {
   test_str1();
   test_str2();
@@ -150,6 +167,7 @@ int main(void) {
   test_str4();
   test_str5();
   test_str6();
+  test_str7();
 
   if (tests_failed) {
     printf("%d of %d tests failed!\n", tests_failed, tests_run);
