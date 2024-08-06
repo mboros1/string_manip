@@ -10,7 +10,7 @@
     * sort, both individual str and arr. pdqsort looks really good
     * copy - done
     * reverse
-    * compare
+    * compare - done
     * hash
     * format
     * contains
