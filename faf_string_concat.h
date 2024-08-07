@@ -10,6 +10,6 @@
 //
 // Runtime Complexity; O(n + m) where n=strlen(str1) and m=strlen(str2)
 // Memory Complexity: O(n + m)
-faf_string* faf_string_concat(pool_t pool, faf_string* str1, faf_string* str2);
+faf_string* faf_string_concat(pool_t pool, faf_string str1, faf_string str2);
 
 #endif // FAF_STRING_CONCAT_H

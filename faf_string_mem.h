@@ -18,4 +18,11 @@ pool_off_t get_pool_offset(pool_t pool);
 
 pool_off_t get_pool_remaining(pool_t pool);
 
+// direct access to the memory pools, better know what you are doing!
+extern faf_string mempools[];
+extern pool_t pool_idxs[];
+
+// length of a pool
+#define BLOCK_LEN 1024
+
 #endif // FAF_STRING_MEM_H
