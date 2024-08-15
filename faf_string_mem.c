@@ -24,7 +24,6 @@
 #define NPOOLS 12
 #endif
 
-#define BLOCK_LEN 1024
 
 // TODO: allow someone to allocate more then 1 pool
 // the following pools will have idx -1 to show them as unused.
