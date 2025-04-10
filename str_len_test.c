@@ -1,6 +1,5 @@
 #include <simde/x86/sse2.h>
 #include <simde/arm/neon.h>
-#include <simde/arm/sve.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
