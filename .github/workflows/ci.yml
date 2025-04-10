@@ -23,16 +23,15 @@ jobs:
         mkdir -p bin
         mkdir -p obj
     
-    - name: Build
+    - name: Build test framework
       run: |
-        # Use gcc instead of gcc-14 which is in the Makefile
         make CC=gcc CFLAGS="-O0 -g -Wall" TEST_FLAGS="-O0 -g -Wall" test_framework
     
-    - name: Build tests
+    - name: Build string split test
       run: |
-        make CC=gcc CFLAGS="-O0 -g -Wall" TEST_FLAGS="-O0 -g -Wall" $(BIN_DIR)/test_faf_string_strsplit
+        make CC=gcc CFLAGS="-O0 -g -Wall" TEST_FLAGS="-O0 -g -Wall" bin/test_faf_string_strsplit
     
-    - name: Run tests
+    - name: Run string split test
       run: |
         ./bin/test_faf_string_strsplit
     
