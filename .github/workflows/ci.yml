@@ -1,0 +1,50 @@
+name: C Tests
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Setup environment
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y build-essential
+    
+    - name: Create directories
+      run: |
+        mkdir -p bin
+        mkdir -p obj
+    
+    - name: Build
+      run: |
+        # Use gcc instead of gcc-14 which is in the Makefile
+        make CC=gcc CFLAGS="-O0 -g -Wall" TEST_FLAGS="-O0 -g -Wall" test_framework
+    
+    - name: Build tests
+      run: |
+        make CC=gcc CFLAGS="-O0 -g -Wall" TEST_FLAGS="-O0 -g -Wall" $(BIN_DIR)/test_faf_string_strsplit
+    
+    - name: Run tests
+      run: |
+        ./bin/test_faf_string_strsplit
+    
+    - name: Build all tests
+      if: success()
+      run: |
+        make CC=gcc CFLAGS="-O0 -g -Wall" TEST_FLAGS="-O0 -g -Wall" test
+    
+    - name: Run all tests
+      if: success()
+      run: |
+        ./bin/test_faf_string
+        ./bin/test_faf_string_mem
+        ./bin/test_faf_string_strsplit
+        ./bin/test_faf_string_cmp

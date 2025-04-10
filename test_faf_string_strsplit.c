@@ -27,9 +27,7 @@ void test_str1() {
 
   int len = arr.end - arr.start;
   int expected = 2;
-  sprintf(error_str, "Array length incorrect: actual: %d, expected: %d\n", len,
-          expected);
-  assert(len == expected, error_str);
+  ASSERT_INT_EQ(expected, len, "Array length incorrect");
 }
 
 const char *str2 = "hello,world,today";
@@ -43,9 +41,7 @@ void test_str2() {
 
   int len = arr.end - arr.start;
   int expected = 3;
-  sprintf(error_str, "Array length incorrect: actual: %d, expected: %d\n", len,
-          expected);
-  assert(len == expected, error_str);
+  ASSERT_INT_EQ(expected, len, "Array length incorrect");
 }
 
 const char *str3 = "";
@@ -59,9 +55,7 @@ void test_str3() {
 
   int len = arr.end - arr.start;
   int expected = 1;
-  sprintf(error_str, "Array length incorrect: actual: %d, expected: %d\n", len,
-          expected);
-  assert(len == expected, error_str);
+  ASSERT_INT_EQ(expected, len, "Array length incorrect");
 }
 
 const char *str4 = ",,,,,,,,,,,";
@@ -75,9 +69,7 @@ void test_str4() {
 
   int len = arr.end - arr.start;
   int expected = 12;
-  sprintf(error_str, "Array length incorrect: actual: %d, expected: %d\n", len,
-          expected);
-  assert(len == expected, error_str);
+  ASSERT_INT_EQ(expected, len, "Array length incorrect");
 }
 
 const char *str5 =
@@ -119,9 +111,7 @@ void test_str5() {
 
   int len = arr.end - arr.start;
   int expected = 36;
-  sprintf(error_str, "Array length incorrect: actual: %d, expected: %d\n", len,
-          expected);
-  assert(len == expected, error_str);
+  ASSERT_INT_EQ(expected, len, "Array length incorrect");
 }
 
 const char *str6 = ",,asdf,asfasdfg,,,";
@@ -135,25 +125,21 @@ void test_str6() {
 
   int len = arr.end - arr.start;
   int expected = 7;
-  sprintf(error_str, "Array length incorrect: actual: %d, expected: %d\n", len,
-          expected);
-  assert(len == expected, error_str);
+  ASSERT_INT_EQ(expected, len, "Array length incorrect");
 }
 
 const char *str7 = "1234567890123456,123";
 void test_str7() {
   tests_run++;
-  printf("Testing string 6...\n");
+  printf("Testing string 7...\n");
   pool_t pool = next_pool();
   faf_string str = faf_string_init(str7);
 
   faf_string_arr arr = faf_string_split(pool, str, ',');
 
   int len = arr.end - arr.start;
-  int expected = 1;
-  sprintf(error_str, "Array length incorrect: actual: %d, expected: %d\n", len,
-          expected);
-  assert(len == expected, error_str);
+  int expected = 2;
+  ASSERT_INT_EQ(expected, len, "Array length incorrect");
 
   // faf_foreach(str, arr) {
   //   printf("%.*s\n", (int)(str->end - str->start), str->start);
@@ -165,7 +151,10 @@ test_case_t strsplit_tests[] = {
     {"basic_split", test_str1},
     {"three_part_split", test_str2},
     {"empty_string", test_str3},
-    {"multiple_delimiters", test_str4}
+    {"multiple_delimiters", test_str4},
+    {"long_string", test_str5},
+    {"empty_segments", test_str6},
+    {"error_check", test_str7}
 };
 
 // Setup and teardown functions
