@@ -1,35 +1,8 @@
 {
     "version": "0.2.0",
     "configurations": [
-        
         {
-            "name": "Debug faf_string test",
-            "type": "cppdbg",
-            "request": "launch",
-            "program": "${workspaceFolder}/bin/test_faf_string",
-            "args": [],
-            "stopAtEntry": false,
-            "cwd": "${workspaceFolder}",
-            "environment": [],
-            "externalConsole": false,
-            "MIMode": "lldb",
-            "preLaunchTask": "build tests"
-        },
-        {
-            "name": "Debug faf_string_mem test",
-            "type": "cppdbg",
-            "request": "launch",
-            "program": "${workspaceFolder}/bin/test_faf_string_mem",
-            "args": [],
-            "stopAtEntry": false,
-            "cwd": "${workspaceFolder}",
-            "environment": [],
-            "externalConsole": false,
-            "MIMode": "lldb",
-            "preLaunchTask": "build tests"
-        },
-        {
-            "name": "Debug faf_string_strsplit test",
+            "name": "Run Framework Tests",
             "type": "cppdbg",
             "request": "launch",
             "program": "${workspaceFolder}/bin/test_faf_string_strsplit",
@@ -39,20 +12,20 @@
             "environment": [],
             "externalConsole": false,
             "MIMode": "lldb",
-            "preLaunchTask": "build tests"
+            "preLaunchTask": "build framework tests"
         },
         {
-            "name": "Debug faf_string_cmp test",
+            "name": "Debug String Split Test",
             "type": "cppdbg",
             "request": "launch",
-            "program": "${workspaceFolder}/bin/test_faf_string_cmp",
+            "program": "${workspaceFolder}/bin/test_faf_string_strsplit",
             "args": [],
             "stopAtEntry": false,
             "cwd": "${workspaceFolder}",
             "environment": [],
             "externalConsole": false,
             "MIMode": "lldb",
-            "preLaunchTask": "build tests"
+            "preLaunchTask": "build framework tests"
         }
     ]
 }

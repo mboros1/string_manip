@@ -13,8 +13,10 @@ void _assert(const char *snippet, const char *file, int line,
 
 
 #ifdef FAF_STRING_ASSERT_IMPL
-
-static int tests_failed = 0;
+int tests_failed = 0;
+#else
+extern int tests_failed;
+#endif
 
 void _assert(const char *snippet, const char *file, int line,
              const char *message, ...) {
@@ -28,6 +30,5 @@ void _assert(const char *snippet, const char *file, int line,
     vprintf(data, arg);
   }
 }
-#endif // FAF_STRING_ASSERT_IMPL
 
 #endif // FAF_STRING_ASSERT_H

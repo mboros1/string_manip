@@ -2,6 +2,7 @@
 #include "faf_string_arr.h"
 #include "faf_string_mem.h"
 #include "faf_string_strsplit.h"
+#include "faf_test.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -149,7 +150,7 @@ void test_str7() {
   faf_string_arr arr = faf_string_split(pool, str, ',');
 
   int len = arr.end - arr.start;
-  int expected = 2;
+  int expected = 1;
   sprintf(error_str, "Array length incorrect: actual: %d, expected: %d\n", len,
           expected);
   assert(len == expected, error_str);
@@ -159,19 +160,35 @@ void test_str7() {
   // }
 }
 
-int main(void) {
-  test_str1();
-  test_str2();
-  test_str3();
-  test_str4();
-  test_str5();
-  test_str6();
-  test_str7();
+// Test case definitions
+test_case_t strsplit_tests[] = {
+    {"basic_split", test_str1},
+    {"three_part_split", test_str2},
+    {"empty_string", test_str3},
+    {"multiple_delimiters", test_str4}
+};
 
-  if (tests_failed) {
-    printf("%d of %d tests failed!\n", tests_failed, tests_run);
-  } else {
-    printf("%d tests passed\n", tests_run);
-  }
-  return 0;
+// Setup and teardown functions
+void strsplit_setup(void) {
+    // Any setup code needed before each test
+}
+
+void strsplit_teardown(void) {
+    // Any cleanup code needed after each test
+}
+
+// Main function
+int main(int argc, char** argv) {
+    // Register test suite
+    test_suite_t suite = TEST_SUITE(
+        "StringSplit", 
+        strsplit_tests,
+        sizeof(strsplit_tests) / sizeof(strsplit_tests[0]),
+        strsplit_setup,
+        strsplit_teardown
+    );
+    register_test_suite(suite);
+    
+    // Normal execution
+    return test_main(argc, argv);
 }

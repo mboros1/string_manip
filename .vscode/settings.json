@@ -1,0 +1,21 @@
+{
+    "c-cpp-flylint.clang.standard": ["c17"],
+    "c-cpp-flylint.standard": ["c17"],
+    "testMate.cpp.test.executables": "{bin/test_*}",
+    "testMate.cpp.log.logfile": "test-explorer.log",
+    "testMate.cpp.discovery.runtimeLimit": 900,
+    "testMate.cpp.test.workingDirectory": "${workspaceFolder}",
+    "testMate.cpp.discovery.framework": "gtest",
+    "testMate.cpp.discovery.extraFields": [
+        {"name": "Test Suite", "regex": "^([^\\.]*)"}
+    ],
+    "testMate.cpp.test.advancedExecutables": [
+        {
+            "pattern": "{bin/test_*}",
+            "cwd": "${workspaceFolder}",
+            "env": {}
+        }
+    ],
+    "testMate.cpp.log.logpanel": true,
+    "testMate.cpp.test.runtimeLimit": 60000
+}

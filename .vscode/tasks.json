@@ -19,11 +19,25 @@
             "problemMatcher": ["$gcc"]
         },
         {
+            "label": "build framework tests",
+            "type": "shell",
+            "command": "make framework_tests",
+            "group": "build",
+            "problemMatcher": ["$gcc"]
+        },
+        {
             "label": "clean",
             "type": "shell",
             "command": "make clean",
             "group": "build",
             "problemMatcher": []
+        },
+        {
+            "label": "build tests for explorer",
+            "type": "shell",
+            "command": "make test_explorer",
+            "group": "build",
+            "problemMatcher": ["$gcc"]
         }
     ]
 }
