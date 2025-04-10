@@ -17,5 +17,31 @@
         }
     ],
     "testMate.cpp.log.logpanel": true,
-    "testMate.cpp.test.runtimeLimit": 60000
+    "testMate.cpp.test.runtimeLimit": 60000,
+    
+    // Custom make settings for local build
+    "makefile.configurations": [
+        {
+            "name": "Default",
+            "makeDirectory": "${workspaceFolder}",
+            "makefilePath": "${workspaceFolder}/Makefile",
+            "makePath": "make",
+            "env": {
+                "CC": "gcc-14",
+                "SIMDE_INCLUDE": "${shell:brew --prefix simde}/include/"
+            }
+        }
+    ],
+    "makefile.defaultLaunchConfiguration": {
+        "cwd": "${workspaceFolder}",
+        "binaryPath": "${workspaceFolder}/bin/${fileBasenameNoExtension}",
+        "env": {}
+    },
+    "makefile.launchConfigurations": [
+        {
+            "cwd": "${workspaceFolder}",
+            "binaryPath": "${workspaceFolder}/bin/test_faf_string",
+            "env": {}
+        }
+    ]
 }

@@ -1,7 +1,23 @@
-# Define the compiler and options
-CC = gcc-14
-CFLAGS = -O0 -I$(shell brew --prefix simde)/include/ -flax-vector-conversions -g
-TEST_FLAGS = -O0 -I$(shell brew --prefix simde)/include/ -flax-vector-conversions -g
+# Only include the .env file if it exists
+ifneq ("$(wildcard .env)","")
+  include .env
+  # Make sure these variables are exported to commands
+  export CC
+  export SIMDE_INCLUDE
+endif
+
+# Define the compiler and options with defaults that can be overridden
+CC ?= gcc
+SIMDE_INCLUDE ?= 
+# Only keep the essential flags in the default
+CFLAGS ?= -O0 -flax-vector-conversions -g
+TEST_FLAGS ?= -O0 -flax-vector-conversions -g
+
+# If SIMDE_INCLUDE is set, add it to the flags
+ifneq ($(SIMDE_INCLUDE),)
+  CFLAGS += -I$(SIMDE_INCLUDE)
+  TEST_FLAGS += -I$(SIMDE_INCLUDE)
+endif
 
 # Directories
 SRC_DIR = .
@@ -98,9 +114,16 @@ test_%: $(BIN_DIR)/test_%
 test_explorer: $(BIN_DIR) $(OBJ_DIR) $(TEST_TARGETS)
 	@echo "All tests built for test explorer"
 
+# Show configuration
+config:
+	@echo "Current configuration:"
+	@echo "CC        = $(CC)"
+	@echo "CFLAGS    = $(CFLAGS)"
+	@echo "TEST_FLAGS = $(TEST_FLAGS)"
+
 # Clean up
 clean:
 	rm -rf $(OBJ_DIR) $(BIN_DIR)
 
-.PHONY: all clean all_tests test_framework test_explorer
+.PHONY: all clean all_tests test_framework test_explorer config
 

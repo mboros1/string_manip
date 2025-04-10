@@ -2,7 +2,7 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Run Framework Tests",
+            "name": "Run All Framework Tests",
             "type": "cppdbg",
             "request": "launch",
             "program": "${workspaceFolder}/bin/test_faf_string_strsplit",
@@ -12,10 +12,17 @@
             "environment": [],
             "externalConsole": false,
             "MIMode": "lldb",
-            "preLaunchTask": "build framework tests"
+            "preLaunchTask": "build tests for explorer",
+            "setupCommands": [
+                {
+                    "description": "Enable pretty-printing for gdb",
+                    "text": "-enable-pretty-printing",
+                    "ignoreFailures": true
+                }
+            ]
         },
         {
-            "name": "Debug String Split Test",
+            "name": "Test String Split",
             "type": "cppdbg",
             "request": "launch",
             "program": "${workspaceFolder}/bin/test_faf_string_strsplit",
@@ -25,7 +32,59 @@
             "environment": [],
             "externalConsole": false,
             "MIMode": "lldb",
-            "preLaunchTask": "build framework tests"
+            "preLaunchTask": "build tests for explorer"
+        },
+        {
+            "name": "Test String Compare",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/bin/test_faf_string_cmp",
+            "args": [],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}",
+            "environment": [],
+            "externalConsole": false,
+            "MIMode": "lldb",
+            "preLaunchTask": "build tests for explorer"
+        },
+        {
+            "name": "Test String Memory",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/bin/test_faf_string_mem",
+            "args": [],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}",
+            "environment": [],
+            "externalConsole": false,
+            "MIMode": "lldb",
+            "preLaunchTask": "build tests for explorer"
+        },
+        {
+            "name": "Test String Base",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/bin/test_faf_string",
+            "args": [],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}",
+            "environment": [],
+            "externalConsole": false,
+            "MIMode": "lldb",
+            "preLaunchTask": "build tests for explorer"
+        },
+        {
+            "name": "Test String Concat",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/bin/test_faf_string_concat",
+            "args": [],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}",
+            "environment": [],
+            "externalConsole": false,
+            "MIMode": "lldb",
+            "preLaunchTask": "build tests for explorer"
         }
     ]
 }

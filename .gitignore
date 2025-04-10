@@ -5,3 +5,5 @@ bin/
 obj/
 a.out
 a.out.*
+.env
+test-explorer.log

@@ -14,14 +14,14 @@
         {
             "label": "build tests",
             "type": "shell",
-            "command": "make test",
+            "command": "make test_framework $(TEST_TARGETS)",
             "group": "build",
             "problemMatcher": ["$gcc"]
         },
         {
-            "label": "build framework tests",
+            "label": "build and run all tests",
             "type": "shell",
-            "command": "make framework_tests",
+            "command": "make all_tests",
             "group": "build",
             "problemMatcher": ["$gcc"]
         },
