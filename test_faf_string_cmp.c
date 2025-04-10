@@ -1,8 +1,8 @@
-
 #include "faf_string.h"
 #include "faf_string_arr.h"
 #include "faf_string_mem.h"
 #include "faf_string_cmp.h"
+#include "faf_test.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -24,12 +24,9 @@ void test_str1() {
   faf_string str1 = faf_string_init(str1_1);
   faf_string str2 = faf_string_init(str1_2);
 
-
   int cmp = faf_string_cmp(&str1, &str2);
   int expected = 0;
-  sprintf(error_str, "Array compare incorrect: actual: %d, expected: %d\n", cmp,
-          expected);
-  assert(cmp == expected, error_str);
+  ASSERT_INT_EQ(expected, cmp, "Array compare incorrect");
 }
 
 const char *str2_1 = "hello";
@@ -40,12 +37,9 @@ void test_str2() {
   faf_string str1 = faf_string_init(str2_1);
   faf_string str2 = faf_string_init(str2_2);
 
-
   int cmp = faf_string_cmp(&str1, &str2);
   int expected = -1;
-  sprintf(error_str, "Array compare incorrect: actual: %d, expected: %d\n", cmp,
-          expected);
-  assert(cmp == expected, error_str);
+  ASSERT_INT_EQ(expected, cmp, "Array compare incorrect");
 }
 
 const char *str3_1 = "b";
@@ -56,23 +50,39 @@ void test_str3() {
   faf_string str1 = faf_string_init(str3_1);
   faf_string str2 = faf_string_init(str3_2);
 
-
   int cmp = faf_string_cmp(&str1, &str2);
   int expected = 1;
-  sprintf(error_str, "Array compare incorrect: actual: %d, expected: %d\n", cmp,
-          expected);
-  assert(cmp == expected, error_str);
+  ASSERT_INT_EQ(expected, cmp, "Array compare incorrect");
 }
 
-int main(void) {
-  test_str1();
-  test_str2();
-  test_str3();
+// Test case definitions
+test_case_t string_cmp_tests[] = {
+    {"equal_strings", test_str1},
+    {"first_shorter", test_str2},
+    {"second_smaller", test_str3}
+};
 
-  if (tests_failed) {
-    printf("%d of %d tests failed!\n", tests_failed, tests_run);
-  } else {
-    printf("%d tests passed\n", tests_run);
-  }
-  return 0;
+// Setup and teardown functions
+void string_cmp_setup(void) {
+    // Any setup code needed before each test
+}
+
+void string_cmp_teardown(void) {
+    // Any cleanup code needed after each test
+}
+
+// Main function
+int main(int argc, char** argv) {
+    // Register test suite
+    test_suite_t suite = TEST_SUITE(
+        "StringCompare", 
+        string_cmp_tests,
+        sizeof(string_cmp_tests) / sizeof(string_cmp_tests[0]),
+        string_cmp_setup,
+        string_cmp_teardown
+    );
+    register_test_suite(suite);
+    
+    // Normal execution
+    return test_main(argc, argv);
 }

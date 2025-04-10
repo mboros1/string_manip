@@ -1,5 +1,7 @@
 #include "faf_string.h"
 #include "faf_string_mem.h"
+#include "faf_test.h"
+
 #include <stdio.h>
 #include <string.h>
 
@@ -19,14 +21,8 @@ void test_next_pool() {
   pool_off_t curr_idx = get_pool_offset(pool);
   pool_off_t remaining_space = get_pool_remaining(pool);
 
-  sprintf(error_str, "Current index incorrect: actual: %d, expected: %d\n", 0,
-          curr_idx);
-  assert(curr_idx == 0, error_str);
-
-  int expected = 1024;
-  sprintf(error_str, "Remaining space is incorrect: actual: %d, expected: %d\n",
-          remaining_space, expected);
-  assert(remaining_space == expected, error_str);
+  ASSERT_INT_EQ(0, curr_idx, "Current index incorrect");
+  ASSERT_INT_EQ(1024, remaining_space, "Remaining space is incorrect");
 }
 
 void test_allocations() {
@@ -38,14 +34,8 @@ void test_allocations() {
   pool_off_t curr_idx = get_pool_offset(pool);
   pool_off_t remaining_space = get_pool_remaining(pool);
 
-  sprintf(error_str, "Current index incorrect: actual: %d, expected: %d\n", 0,
-          curr_idx);
-  assert(curr_idx == 1, error_str);
-
-  int expected = 1023;
-  sprintf(error_str, "Remaining space is incorrect: actual: %d, expected: %d\n",
-          remaining_space, expected);
-  assert(remaining_space == expected, error_str);
+  ASSERT_INT_EQ(1, curr_idx, "Current index incorrect");
+  ASSERT_INT_EQ(1023, remaining_space, "Remaining space is incorrect");
 
   const char *test_str = "Hello World!\n";
   *str1 = faf_string_init(test_str);
@@ -53,13 +43,9 @@ void test_allocations() {
   printf("Test printing allocated string: \'%s\'", str1->start);
 
   int actual = strcmp(test_str, str1->start);
-  expected = 0;
+  int expected = 0;
 
-  sprintf(error_str,
-          "String compare between allocated string and test string failed: "
-          "actual: %d, expected: %d\n",
-          expected, remaining_space);
-  assert(actual == expected, error_str);
+  ASSERT_INT_EQ(expected, actual, "String compare between allocated string and test string failed");
 }
 
 void test_string_copy_short() {
@@ -76,11 +62,7 @@ void test_string_copy_short() {
   int actual = strcmp(base_str, str1_copy->start);
   int expected = 0;
 
-  sprintf(error_str,
-          "String compare between allocated string and test string failed: "
-          "actual: %s, expected: %s\n",
-          str1_copy->start, base_str);
-  assert(actual == expected, error_str);
+  ASSERT_INT_EQ(expected, actual, "String compare between allocated string and test string failed");
 }
 
 void test_string_copy_long() {
@@ -125,11 +107,7 @@ void test_string_copy_long() {
   int actual = strcmp(base_str, str1_copy->start);
   int expected = 0;
 
-  sprintf(error_str,
-          "String compare between allocated string and test string failed: "
-          "actual: %s, expected: %s\n",
-          str1_copy->start, base_str);
-  assert(actual == expected, error_str);
+  ASSERT_INT_EQ(expected, actual, "String compare between allocated string and test string failed");
 }
 
 void test_alloc_pool_size_change() {
@@ -138,40 +116,51 @@ void test_alloc_pool_size_change() {
 
   pool_t pool = next_pool();
 
-  sprintf(error_str, "Initial pool index incorrect: actual %d, expected%d\n",
-          get_pool_offset(pool), 0);
-  sprintf(error_str, "Initial pool capacity incorrect: actual %d, expected%d\n",
-          get_pool_remaining(pool), 1024);
+  ASSERT_INT_EQ(0, get_pool_offset(pool), "Initial pool index incorrect");
+  ASSERT_INT_EQ(1024, get_pool_remaining(pool), "Initial pool capacity incorrect");
 
   for (int i = 0; i < 10; ++i) {
     (void)faf_string_alloc(pool);
   }
-  sprintf(error_str, "After allocation pool index incorrect: actual %d, expected%d\n",
-          get_pool_offset(pool), 10);
-  sprintf(error_str, "After allocation pool capacity incorrect: actual %d, expected%d\n",
-          get_pool_remaining(pool), 1014);
+  ASSERT_INT_EQ(10, get_pool_offset(pool), "After allocation pool index incorrect");
+  ASSERT_INT_EQ(1014, get_pool_remaining(pool), "After allocation pool capacity incorrect");
 
   faf_string_pool_reset(pool);
 
-  sprintf(error_str, "After allocation pool index incorrect: actual %d, expected%d\n",
-          get_pool_offset(pool), 0);
-  sprintf(error_str, "After allocation pool capacity incorrect: actual %d, expected%d\n",
-          get_pool_remaining(pool), 1024);
-
+  ASSERT_INT_EQ(0, get_pool_offset(pool), "After reset pool index incorrect");
+  ASSERT_INT_EQ(1024, get_pool_remaining(pool), "After reset pool capacity incorrect");
 }
 
-// Main function to run all tests
-int main() {
-  test_next_pool();
-  test_allocations();
-  test_string_copy_short();
-  test_string_copy_long();
-  test_alloc_pool_size_change();
+// Test case definitions
+test_case_t string_mem_tests[] = {
+    {"pool_initialization", test_next_pool},
+    {"allocation", test_allocations},
+    {"string_copy_short", test_string_copy_short},
+    {"string_copy_long", test_string_copy_long},
+    {"pool_size_change", test_alloc_pool_size_change}
+};
 
-  if (tests_failed) {
-    printf("%d of %d tests failed!\n", tests_failed, tests_run);
-  } else {
-    printf("%d tests passed\n", tests_run);
-  }
-  return 0;
+// Setup and teardown functions
+void string_mem_setup(void) {
+    // Any setup code needed before each test
+}
+
+void string_mem_teardown(void) {
+    // Any cleanup code needed after each test
+}
+
+// Main function
+int main(int argc, char** argv) {
+    // Register test suite
+    test_suite_t suite = TEST_SUITE(
+        "StringMemory", 
+        string_mem_tests,
+        sizeof(string_mem_tests) / sizeof(string_mem_tests[0]),
+        string_mem_setup,
+        string_mem_teardown
+    );
+    register_test_suite(suite);
+    
+    // Normal execution
+    return test_main(argc, argv);
 }

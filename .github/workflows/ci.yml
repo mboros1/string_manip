@@ -18,27 +18,9 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y build-essential libsimde-dev
     
-    - name: Create directories
+    - name: Build project
       run: |
-        mkdir -p bin
-        mkdir -p obj
-    
-    - name: Build test framework
-      run: |
-        make CC=gcc CFLAGS="-O0 -g -Wall" TEST_FLAGS="-O0 -g -Wall" test_framework
-    
-    - name: Build string split test
-      run: |
-        make CC=gcc CFLAGS="-O0 -g -Wall" TEST_FLAGS="-O0 -g -Wall" bin/test_faf_string_strsplit
-    
-    - name: Run string split test
-      run: |
-        ./bin/test_faf_string_strsplit
-    
-    - name: Build all tests
-      if: success()
-      run: |
-        make CC=gcc CFLAGS="-O0 -g -Wall" TEST_FLAGS="-O0 -g -Wall" test
+        make all
     
     - name: Run all tests
       if: success()
