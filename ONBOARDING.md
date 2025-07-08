@@ -13,7 +13,7 @@ Welcome to your project workspace! This guide will help you get started with you
 ## Getting Started
 
 ### Step 1: Review Your Assignment
-Your assignment is in the PR description at: [PR URL]
+Your assignment is in the PR description at: https://github.com/mboros1/string_manip/pull/2
 
 ### Step 2: Set Up Your Environment
 ```bash
@@ -57,11 +57,11 @@ As you discover patterns, solve problems, or learn about the codebase:
 ```bash
 # Quick backup (from feature branch)
 git stash push -m "temp" -- CLAUDE.md
-git checkout private/[your-name]/[feature-name]
+git checkout private/worker_3/simd-implementations
 git stash pop
 git commit -am "Update: [what you learned]"
 git push
-git checkout feature/[branch-name]
+git checkout feature/simd-string-operations
 ```
 
 ## Communication Protocol
