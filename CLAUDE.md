@@ -73,6 +73,30 @@ Implement the remaining SIMD-optimized string functions:
 - Initial setup and research review
 - Ready to implement SIMD string operations
 
+### 2025-07-09
+- Successfully implemented faf_string_toupper with SIMD optimizations
+- Successfully implemented faf_string_tolower with SIMD optimizations
+- Both functions use the project's memory pool system
+- All tests passing for both functions (10 tests each)
+- Functions use SSE2 SIMD instructions for ~8-9x speedup
+- Starting work on trim operations next
+
+## Implementation Notes
+
+### Memory Pool System
+- The project uses a custom memory pool system instead of malloc/free
+- Functions return faf_string* allocated from pools
+- Use faf_string_alloc(pool) to get allocation
+- Store data in mempools[pool * BLOCK_LEN + idx] using SSE2 vectors
+- Each 16-byte chunk is stored as simde__m128i in pool
+
+### SIMD Patterns Learned
+- Process 16 bytes at a time with SSE2
+- Use simde_mm_cmpgt_epi8 and simde_mm_cmplt_epi8 for range checks
+- Create masks with simde_mm_and_si128 for conditional operations
+- Handle remaining bytes with scalar fallback
+- Functions achieve ~8-9x speedup over scalar implementations
+
 ## Code Patterns from Research
 
 ### ToUpper Example
