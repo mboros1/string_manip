@@ -97,6 +97,48 @@ $(BIN_DIR)/test_faf_string_cmp: $(OBJ_DIR)/faf_string.o $(OBJ_DIR)/faf_string_st
 $(BIN_DIR)/test_faf_string_concat: $(OBJ_DIR)/faf_string.o $(OBJ_DIR)/faf_string_strlen.o $(OBJ_DIR)/faf_string_mem.o $(OBJ_DIR)/test_faf_string_concat.o $(OBJ_DIR)/faf_string_concat.o $(OBJ_DIR)/faf_test.o
 	$(CC) $(TEST_FLAGS) $(OBJ_DIR)/faf_string.o $(OBJ_DIR)/test_faf_string_concat.o $(OBJ_DIR)/faf_string_mem.o $(OBJ_DIR)/faf_string_strlen.o $(OBJ_DIR)/faf_string_concat.o $(OBJ_DIR)/faf_test.o -o $@ -g
 
+$(OBJ_DIR)/faf_string_toupper.o: $(SRC_DIR)/faf_string_toupper.c $(SRC_DIR)/faf_string_toupper.h
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BIN_DIR)/test_faf_string_toupper: $(OBJ_DIR)/faf_string.o $(OBJ_DIR)/faf_string_strlen.o $(OBJ_DIR)/faf_string_mem.o $(OBJ_DIR)/test_faf_string_toupper.o $(OBJ_DIR)/faf_string_toupper.o $(OBJ_DIR)/faf_test.o
+	$(CC) $(TEST_FLAGS) $(OBJ_DIR)/faf_string.o $(OBJ_DIR)/test_faf_string_toupper.o $(OBJ_DIR)/faf_string_mem.o $(OBJ_DIR)/faf_string_strlen.o $(OBJ_DIR)/faf_string_toupper.o $(OBJ_DIR)/faf_test.o -o $@ -g
+
+$(OBJ_DIR)/faf_string_tolower.o: $(SRC_DIR)/faf_string_tolower.c $(SRC_DIR)/faf_string_tolower.h
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BIN_DIR)/test_faf_string_tolower: $(OBJ_DIR)/faf_string.o $(OBJ_DIR)/faf_string_strlen.o $(OBJ_DIR)/faf_string_mem.o $(OBJ_DIR)/test_faf_string_tolower.o $(OBJ_DIR)/faf_string_tolower.o $(OBJ_DIR)/faf_test.o
+	$(CC) $(TEST_FLAGS) $(OBJ_DIR)/faf_string.o $(OBJ_DIR)/test_faf_string_tolower.o $(OBJ_DIR)/faf_string_mem.o $(OBJ_DIR)/faf_string_strlen.o $(OBJ_DIR)/faf_string_tolower.o $(OBJ_DIR)/faf_test.o -o $@ -g
+
+$(OBJ_DIR)/faf_string_trim.o: $(SRC_DIR)/faf_string_trim.c $(SRC_DIR)/faf_string_trim.h
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BIN_DIR)/test_faf_string_trim: $(OBJ_DIR)/faf_string.o $(OBJ_DIR)/faf_string_strlen.o $(OBJ_DIR)/faf_string_mem.o $(OBJ_DIR)/test_faf_string_trim.o $(OBJ_DIR)/faf_string_trim.o $(OBJ_DIR)/faf_test.o
+	$(CC) $(TEST_FLAGS) $(OBJ_DIR)/faf_string.o $(OBJ_DIR)/test_faf_string_trim.o $(OBJ_DIR)/faf_string_mem.o $(OBJ_DIR)/faf_string_strlen.o $(OBJ_DIR)/faf_string_trim.o $(OBJ_DIR)/faf_test.o -o $@ -g
+
+$(OBJ_DIR)/faf_string_reverse.o: $(SRC_DIR)/faf_string_reverse.c $(SRC_DIR)/faf_string_reverse.h
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BIN_DIR)/test_faf_string_reverse: $(OBJ_DIR)/faf_string.o $(OBJ_DIR)/faf_string_strlen.o $(OBJ_DIR)/faf_string_mem.o $(OBJ_DIR)/test_faf_string_reverse.o $(OBJ_DIR)/faf_string_reverse.o $(OBJ_DIR)/faf_test.o
+	$(CC) $(TEST_FLAGS) $(OBJ_DIR)/faf_string.o $(OBJ_DIR)/test_faf_string_reverse.o $(OBJ_DIR)/faf_string_mem.o $(OBJ_DIR)/faf_string_strlen.o $(OBJ_DIR)/faf_string_reverse.o $(OBJ_DIR)/faf_test.o -o $@ -g
+
+$(OBJ_DIR)/faf_string_contains.o: $(SRC_DIR)/faf_string_contains.c $(SRC_DIR)/faf_string_contains.h
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BIN_DIR)/test_faf_string_contains: $(OBJ_DIR)/faf_string.o $(OBJ_DIR)/faf_string_strlen.o $(OBJ_DIR)/faf_string_mem.o $(OBJ_DIR)/test_faf_string_contains.o $(OBJ_DIR)/faf_string_contains.o $(OBJ_DIR)/faf_test.o
+	$(CC) $(TEST_FLAGS) $(OBJ_DIR)/faf_string.o $(OBJ_DIR)/test_faf_string_contains.o $(OBJ_DIR)/faf_string_mem.o $(OBJ_DIR)/faf_string_strlen.o $(OBJ_DIR)/faf_string_contains.o $(OBJ_DIR)/faf_test.o -o $@ -g
+
+$(OBJ_DIR)/faf_string_hash.o: $(SRC_DIR)/faf_string_hash.c $(SRC_DIR)/faf_string_hash.h
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BIN_DIR)/test_faf_string_hash: $(OBJ_DIR)/faf_string.o $(OBJ_DIR)/faf_string_strlen.o $(OBJ_DIR)/faf_string_mem.o $(OBJ_DIR)/test_faf_string_hash.o $(OBJ_DIR)/faf_string_hash.o $(OBJ_DIR)/faf_test.o
+	$(CC) $(TEST_FLAGS) $(OBJ_DIR)/faf_string.o $(OBJ_DIR)/test_faf_string_hash.o $(OBJ_DIR)/faf_string_mem.o $(OBJ_DIR)/faf_string_strlen.o $(OBJ_DIR)/faf_string_hash.o $(OBJ_DIR)/faf_test.o -o $@ -g
+
+$(OBJ_DIR)/faf_string_sort.o: $(SRC_DIR)/faf_string_sort.c $(SRC_DIR)/faf_string_sort.h
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BIN_DIR)/test_faf_string_sort: $(OBJ_DIR)/faf_string.o $(OBJ_DIR)/faf_string_strlen.o $(OBJ_DIR)/faf_string_mem.o $(OBJ_DIR)/test_faf_string_sort.o $(OBJ_DIR)/faf_string_sort.o $(OBJ_DIR)/faf_test.o
+	$(CC) $(TEST_FLAGS) $(OBJ_DIR)/faf_string.o $(OBJ_DIR)/test_faf_string_sort.o $(OBJ_DIR)/faf_string_mem.o $(OBJ_DIR)/faf_string_strlen.o $(OBJ_DIR)/faf_string_sort.o $(OBJ_DIR)/faf_test.o -o $@ -g
+
 # Target to run all tests using the framework
 all_tests: test_framework $(TEST_TARGETS)
 	@echo "All tests built with framework support"
