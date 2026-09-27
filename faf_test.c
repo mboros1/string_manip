@@ -148,12 +148,12 @@ int run_all_tests(void) {
         stats.total_tests += test_suites[s].test_count;
         stats.total_suites++;
         
-        // Reset tests_failed before each test
-        tests_failed = 0;
-        
         for (int t = 0; t < test_suites[s].test_count; t++) {
             test_case_t test = test_suites[s].tests[t];
             clock_t test_start, test_end;
+
+            // Reset tests_failed before each test
+            tests_failed = 0;
             
             // Setup if available
             if (test_suites[s].setup != NULL) {
