@@ -1,4 +1,5 @@
 #include "faf_test.h"
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -31,8 +32,9 @@ typedef struct {
 
 static test_stats_t stats = {0};
 
-// At the top, with other global variables
-static int tests_failed = 0; // Move this into the test framework
+// Did the current test fail an assertion? Set by the test_assert_*
+// functions, reset by run_one() before each test.
+static bool test_failed = false;
 
 // Register a test suite
 void register_test_suite(test_suite_t suite) {
@@ -59,164 +61,127 @@ static void print_test_failure(const char* suite_name, const char* test_name, do
            suite_name, test_name, duration);
 }
 
-// Run a specific test suite by name
-int run_test_suite(const char* suite_name) {
-    int found = 0;
-    int result = 0;
-    
-    stats.start_time = clock();
-    
-    for (int s = 0; s < suite_count; s++) {
-        if (strcmp(test_suites[s].name, suite_name) == 0) {
-            found = 1;
-            
-            printf(ANSI_COLOR_YELLOW "[==========] " ANSI_COLOR_RESET 
-                   "Running %d tests from %s\n", 
-                   test_suites[s].test_count, test_suites[s].name);
-            
-            stats.total_tests += test_suites[s].test_count;
-            stats.total_suites++;
-            
-            for (int t = 0; t < test_suites[s].test_count; t++) {
-                test_case_t test = test_suites[s].tests[t];
+// Run one test with its suite's setup/teardown, print its result line and
+// count it. Returns true if it failed. Every runner goes through here, so
+// all of them judge a test the same way.
+static bool run_one(const test_suite_t* suite, const test_case_t* test) {
+    test_failed = false;
 
-                // Reset tests_failed before each test
-                tests_failed = 0;
-                clock_t test_start, test_end;
-                
-                // Setup if available
-                if (test_suites[s].setup != NULL) {
-                    test_suites[s].setup();
-                }
-                
-                // Run the test and track failures
-                print_test_header(test_suites[s].name, test.name);
-                test_start = clock();
-                
-                test.func();
-                
-                test_end = clock();
-                double duration = 1000.0 * (test_end - test_start) / CLOCKS_PER_SEC;
-                
-                if (tests_failed > 0) {
-                    print_test_failure(test_suites[s].name, test.name, duration);
-                    stats.failed_tests++;
-                    result = 1; // Indicate failure
-                } else {
-                    print_test_success(test_suites[s].name, test.name, duration);
-                    stats.passed_tests++;
-                }
-                
-                // Teardown if available
-                if (test_suites[s].teardown != NULL) {
-                    test_suites[s].teardown();
-                }
-            }
-            
-            printf(ANSI_COLOR_YELLOW "[==========] " ANSI_COLOR_RESET 
-                   "%d tests from %s completed\n", 
-                   test_suites[s].test_count, test_suites[s].name);
-            break;
+    if (suite->setup != NULL) {
+        suite->setup();
+    }
+
+    print_test_header(suite->name, test->name);
+    clock_t test_start = clock();
+
+    test->func();
+
+    double duration = 1000.0 * (clock() - test_start) / CLOCKS_PER_SEC;
+    if (test_failed) {
+        print_test_failure(suite->name, test->name, duration);
+        stats.failed_tests++;
+    } else {
+        print_test_success(suite->name, test->name, duration);
+        stats.passed_tests++;
+    }
+
+    if (suite->teardown != NULL) {
+        suite->teardown();
+    }
+    return test_failed;
+}
+
+// Run every test in `suite`. Returns true if any failed.
+static bool run_suite(const test_suite_t* suite) {
+    stats.total_tests += suite->test_count;
+    stats.total_suites++;
+
+    bool failed = false;
+    for (int t = 0; t < suite->test_count; t++) {
+        failed |= run_one(suite, &suite->tests[t]);
+    }
+    return failed;
+}
+
+static const test_suite_t* find_suite(const char* name) {
+    for (int s = 0; s < suite_count; s++) {
+        if (strcmp(test_suites[s].name, name) == 0) {
+            return &test_suites[s];
         }
     }
-    
-    stats.end_time = clock();
-    
-    if (!found) {
+    return NULL;
+}
+
+// Run a specific test suite by name
+int run_test_suite(const char* suite_name) {
+    const test_suite_t* suite = find_suite(suite_name);
+    if (suite == NULL) {
         fprintf(stderr, "Error: Test suite '%s' not found\n", suite_name);
         return -1;
     }
-    
-    return result;
+
+    stats.start_time = clock();
+    printf(ANSI_COLOR_YELLOW "[==========] " ANSI_COLOR_RESET
+           "Running %d tests from %s\n", suite->test_count, suite->name);
+
+    bool failed = run_suite(suite);
+
+    printf(ANSI_COLOR_YELLOW "[==========] " ANSI_COLOR_RESET
+           "%d tests from %s completed\n", suite->test_count, suite->name);
+    stats.end_time = clock();
+
+    return failed ? 1 : 0;
 }
 
 // Run all registered test suites
 int run_all_tests(void) {
     stats = (test_stats_t){0}; // Reset statistics
     stats.start_time = clock();
-    
-    int result = 0;
-    printf(ANSI_COLOR_YELLOW "[==========] " ANSI_COLOR_RESET 
-           "Running all tests from %d test suites\n", suite_count);
-    
-    for (int s = 0; s < suite_count; s++) {
-        // Run each test suite
-        printf(ANSI_COLOR_YELLOW "[----------] " ANSI_COLOR_RESET 
-               "Running %d tests from %s\n", 
-               test_suites[s].test_count, test_suites[s].name);
-        
-        stats.total_tests += test_suites[s].test_count;
-        stats.total_suites++;
-        
-        for (int t = 0; t < test_suites[s].test_count; t++) {
-            test_case_t test = test_suites[s].tests[t];
-            clock_t test_start, test_end;
 
-            // Reset tests_failed before each test
-            tests_failed = 0;
-            
-            // Setup if available
-            if (test_suites[s].setup != NULL) {
-                test_suites[s].setup();
-            }
-            
-            // Run the test
-            print_test_header(test_suites[s].name, test.name);
-            test_start = clock();
-            
-            test.func();
-            
-            test_end = clock();
-            double duration = 1000.0 * (test_end - test_start) / CLOCKS_PER_SEC;
-            
-            if (tests_failed > 0) {
-                print_test_failure(test_suites[s].name, test.name, duration);
-                stats.failed_tests++;
-                result = 1; // Indicate failure
-            } else {
-                print_test_success(test_suites[s].name, test.name, duration);
-                stats.passed_tests++;
-            }
-            
-            // Teardown if available
-            if (test_suites[s].teardown != NULL) {
-                test_suites[s].teardown();
-            }
-        }
-        
-        printf(ANSI_COLOR_YELLOW "[----------] " ANSI_COLOR_RESET 
-               "%d tests from %s completed\n", 
+    printf(ANSI_COLOR_YELLOW "[==========] " ANSI_COLOR_RESET
+           "Running all tests from %d test suites\n", suite_count);
+
+    bool failed = false;
+    for (int s = 0; s < suite_count; s++) {
+        printf(ANSI_COLOR_YELLOW "[----------] " ANSI_COLOR_RESET
+               "Running %d tests from %s\n",
+               test_suites[s].test_count, test_suites[s].name);
+
+        failed |= run_suite(&test_suites[s]);
+
+        printf(ANSI_COLOR_YELLOW "[----------] " ANSI_COLOR_RESET
+               "%d tests from %s completed\n",
                test_suites[s].test_count, test_suites[s].name);
     }
-    
+
     stats.end_time = clock();
     double total_duration = 1000.0 * (stats.end_time - stats.start_time) / CLOCKS_PER_SEC;
-    
+
     // Print final summary
-    printf(ANSI_COLOR_YELLOW "[==========] " ANSI_COLOR_RESET 
+    printf(ANSI_COLOR_YELLOW "[==========] " ANSI_COLOR_RESET
            "%d tests from %d test suites ran. (%.2f ms total)\n",
            stats.total_tests, stats.total_suites, total_duration);
-    
-    printf(ANSI_COLOR_GREEN "[  PASSED  ] " ANSI_COLOR_RESET 
+
+    printf(ANSI_COLOR_GREEN "[  PASSED  ] " ANSI_COLOR_RESET
            "%d tests\n", stats.passed_tests);
-    
+
     if (stats.failed_tests > 0) {
-        printf(ANSI_COLOR_RED "[  FAILED  ] " ANSI_COLOR_RESET 
+        printf(ANSI_COLOR_RED "[  FAILED  ] " ANSI_COLOR_RESET
                "%d tests\n", stats.failed_tests);
     }
-    
+
     if (stats.skipped_tests > 0) {
-        printf(ANSI_COLOR_YELLOW "[  SKIPPED ] " ANSI_COLOR_RESET 
+        printf(ANSI_COLOR_YELLOW "[  SKIPPED ] " ANSI_COLOR_RESET
                "%d tests\n", stats.skipped_tests);
     }
-    
-    return result;
+
+    return failed ? 1 : 0;
 }
 
 // Assertion implementations to replace the ones in faf_string_assert.h
 void test_assert_true(int condition, const char* file, int line, const char* message) {
     if (!condition) {
-        tests_failed++; // Use the local variable
+        test_failed = true;
         
         printf(ANSI_COLOR_RED "    Assertion failed at %s:%d\n" ANSI_COLOR_RESET, file, line);
         if (message && *message) {
@@ -228,7 +193,7 @@ void test_assert_true(int condition, const char* file, int line, const char* mes
 void test_assert_str_eq(const char* expected, const char* actual, 
                         const char* file, int line, const char* message) {
     if (strcmp(expected, actual) != 0) {
-        tests_failed++; // Use the local variable
+        test_failed = true;
         
         printf(ANSI_COLOR_RED "    String equality assertion failed at %s:%d\n" ANSI_COLOR_RESET, file, line);
         printf("        Expected: \"%s\"\n", expected);
@@ -242,7 +207,7 @@ void test_assert_str_eq(const char* expected, const char* actual,
 void test_assert_int_eq(int expected, int actual, 
                        const char* file, int line, const char* message) {
     if (expected != actual) {
-        tests_failed++; // Use the local variable
+        test_failed = true;
         
         printf(ANSI_COLOR_RED "    Integer equality assertion failed at %s:%d\n" ANSI_COLOR_RESET, file, line);
         printf("        Expected: %d\n", expected);
@@ -251,69 +216,6 @@ void test_assert_int_eq(int expected, int actual,
             printf("    Message: %s\n", message);
         }
     }
-}
-
-void run_all_tests_xml_output(void) {
-    // Reset statistics
-    stats = (test_stats_t){0};
-    stats.start_time = clock();
-    
-    printf("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
-    printf("<testsuites>\n");
-    
-    for (int s = 0; s < suite_count; s++) {
-        printf("  <testsuite name=\"%s\" tests=\"%d\">\n", 
-               test_suites[s].name, test_suites[s].test_count);
-        
-        stats.total_tests += test_suites[s].test_count;
-        stats.total_suites++;
-        
-        // Reset test failure counter before each suite
-        tests_failed = 0;
-        
-        for (int t = 0; t < test_suites[s].test_count; t++) {
-            test_case_t test = test_suites[s].tests[t];
-            clock_t test_start, test_end;
-            
-            // Setup if available
-            if (test_suites[s].setup != NULL) {
-                test_suites[s].setup();
-            }
-            
-            // Run the test
-            test_start = clock();
-            int fail_before = tests_failed;
-            
-            test.func();
-            
-            test_end = clock();
-            double duration = 1000.0 * (test_end - test_start) / CLOCKS_PER_SEC;
-            
-            printf("    <testcase name=\"%s\" classname=\"%s\" time=\"%.3f\"", 
-                   test.name, test_suites[s].name, duration/1000.0);
-            
-            if (tests_failed > fail_before) {
-                printf(">\n");
-                printf("      <failure message=\"Test failed\"></failure>\n");
-                printf("    </testcase>\n");
-                stats.failed_tests++;
-            } else {
-                printf("/>\n");
-                stats.passed_tests++;
-            }
-            
-            // Teardown if available
-            if (test_suites[s].teardown != NULL) {
-                test_suites[s].teardown();
-            }
-        }
-        
-        printf("  </testsuite>\n");
-    }
-    
-    printf("</testsuites>\n");
-    
-    stats.end_time = clock();
 }
 
 void run_tests_gtest_format(void) {
@@ -327,78 +229,53 @@ void run_tests_gtest_format(void) {
     }
 }
 
+// Run the single test `suite_name`.`test_name`
+static int run_single_test(const char* suite_name, const char* test_name) {
+    const test_suite_t* suite = find_suite(suite_name);
+    if (suite == NULL) {
+        printf("Test suite %s not found\n", suite_name);
+        return 1;
+    }
+    for (int t = 0; t < suite->test_count; t++) {
+        if (strcmp(suite->tests[t].name, test_name) == 0) {
+            printf(ANSI_COLOR_YELLOW "[==========] " ANSI_COLOR_RESET
+                   "Running 1 test from %s\n", suite_name);
+
+            bool failed = run_one(suite, &suite->tests[t]);
+
+            printf(ANSI_COLOR_YELLOW "[==========] " ANSI_COLOR_RESET
+                   "1 test from %s completed\n", suite_name);
+            return failed ? 1 : 0;
+        }
+    }
+    printf("Test %s.%s not found\n", suite_name, test_name);
+    return 1;
+}
+
 int test_main(int argc, char** argv) {
     // Check for special modes
     if (argc > 1) {
-        if (strcmp(argv[1], "--gtest_format") == 0 || 
+        if (strcmp(argv[1], "--gtest_format") == 0 ||
             strcmp(argv[1], "--gtest_list_tests") == 0) {
             // Just output test names in GTest format for discovery
             run_tests_gtest_format();
             return 0;
         }
-        
+
         // Support for running individual tests
         // Format: test_executable "SuiteName.TestName"
         char* dot = strchr(argv[1], '.');
         if (dot) {
             *dot = '\0'; // Split the string
-            const char* suite_name = argv[1];
-            const char* test_name = dot + 1;
-            
-            // Find and run the specific test
-            for (int s = 0; s < suite_count; s++) {
-                if (strcmp(test_suites[s].name, suite_name) == 0) {
-                    for (int t = 0; t < test_suites[s].test_count; t++) {
-                        if (strcmp(test_suites[s].tests[t].name, test_name) == 0) {
-                            // Run just this test
-                            printf(ANSI_COLOR_YELLOW "[==========] " ANSI_COLOR_RESET 
-                                  "Running 1 test from %s\n", suite_name);
-                            
-                            if (test_suites[s].setup) test_suites[s].setup();
-                            
-                            clock_t test_start = clock();
-                            print_test_header(suite_name, test_name);
-                            
-                            // Reset test failures before running test
-                            tests_failed = 0;
-                            
-                            test_suites[s].tests[t].func();
-                            
-                            clock_t test_end = clock();
-                            double duration = 1000.0 * (test_end - test_start) / CLOCKS_PER_SEC;
-                            
-                            if (tests_failed > 0) {
-                                print_test_failure(suite_name, test_name, duration);
-                            } else {
-                                print_test_success(suite_name, test_name, duration);
-                            }
-                            
-                            if (test_suites[s].teardown) test_suites[s].teardown();
-                            
-                            printf(ANSI_COLOR_YELLOW "[==========] " ANSI_COLOR_RESET 
-                                  "1 test from %s completed\n", suite_name);
-                            
-                            return tests_failed > 0 ? 1 : 0;
-                        }
-                    }
-                    
-                    printf("Test %s.%s not found\n", suite_name, test_name);
-                    return 1;
-                }
-            }
-            
-            printf("Test suite %s not found\n", suite_name);
-            return 1;
+            return run_single_test(argv[1], dot + 1);
         }
-        
+
         // Support for running a specific test suite
-        for (int s = 0; s < suite_count; s++) {
-            if (strcmp(test_suites[s].name, argv[1]) == 0) {
-                return run_test_suite(argv[1]);
-            }
+        if (find_suite(argv[1]) != NULL) {
+            return run_test_suite(argv[1]);
         }
     }
-    
+
     // Normal execution - run all tests
     return run_all_tests();
 }
