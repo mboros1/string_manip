@@ -178,7 +178,7 @@ int run_all_tests(void) {
     return failed ? 1 : 0;
 }
 
-// Assertion implementations to replace the ones in faf_string_assert.h
+// Assertion implementations
 void test_assert_true(int condition, const char* file, int line, const char* message) {
     if (!condition) {
         test_failed = true;

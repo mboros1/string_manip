@@ -7,19 +7,9 @@
 #include <stdio.h>
 #include <string.h>
 
-#define FAF_STRING_ASSERT_IMPL
-#include "faf_string_assert.h"
-
-#define NDEBUG
-
-int tests_run = 0;
-
-char error_str[10 * 1024];
-
 const char *str1_1 = "hello";
 const char *str1_2 = "hello";
 void test_str1() {
-  tests_run++;
   printf("Testing string 1:1 to 1:2...\n");
   faf_string str1 = faf_string_init(str1_1);
   faf_string str2 = faf_string_init(str1_2);
@@ -32,7 +22,6 @@ void test_str1() {
 const char *str2_1 = "hello";
 const char *str2_2 = "hello1";
 void test_str2() {
-  tests_run++;
   printf("Testing string 2:1 to 2:2...\n");
   faf_string str1 = faf_string_init(str2_1);
   faf_string str2 = faf_string_init(str2_2);
@@ -45,7 +34,6 @@ void test_str2() {
 const char *str3_1 = "b";
 const char *str3_2 = "a";
 void test_str3() {
-  tests_run++;
   printf("Testing string 3:1 to 3:2...\n");
   faf_string str1 = faf_string_init(str3_1);
   faf_string str2 = faf_string_init(str3_2);

@@ -7,18 +7,8 @@
 #include <stdio.h>
 #include <string.h>
 
-#define FAF_STRING_ASSERT_IMPL
-#include "faf_string_assert.h"
-
-#define NDEBUG
-
-int tests_run = 0;
-
-char error_str[10 * 1024];
-
 const char *str1 = "hello,world";
 void test_str1() {
-  tests_run++;
   printf("Testing string 1...\n");
   pool_t pool = next_pool();
   faf_string str = faf_string_init(str1);
@@ -32,7 +22,6 @@ void test_str1() {
 
 const char *str2 = "hello,world,today";
 void test_str2() {
-  tests_run++;
   printf("Testing string 2...\n");
   pool_t pool = next_pool();
   faf_string str = faf_string_init(str2);
@@ -46,7 +35,6 @@ void test_str2() {
 
 const char *str3 = "";
 void test_str3() {
-  tests_run++;
   printf("Testing string 3...\n");
   pool_t pool = next_pool();
   faf_string str = faf_string_init(str3);
@@ -60,7 +48,6 @@ void test_str3() {
 
 const char *str4 = ",,,,,,,,,,,";
 void test_str4() {
-  tests_run++;
   printf("Testing string 4...\n");
   pool_t pool = next_pool();
   faf_string str = faf_string_init(str4);
@@ -102,7 +89,6 @@ const char *str5 =
     "sA59h1QawuvzJu9Csj96yE2OffYYbu7ybj6z2WGPB3HRJrK7gr8aN7dQoYtxo5ZQ4MBBvyMJ"
     "KI0s737pWcAPRNyCAUUTRPssag9wmvxpMUzdTCO7pQ93";
 void test_str5() {
-  tests_run++;
   printf("Testing string 5...\n");
   pool_t pool = next_pool();
   faf_string str = faf_string_init(str5);
@@ -116,7 +102,6 @@ void test_str5() {
 
 const char *str6 = ",,asdf,asfasdfg,,,";
 void test_str6() {
-  tests_run++;
   printf("Testing string 6...\n");
   pool_t pool = next_pool();
   faf_string str = faf_string_init(str6);
@@ -130,7 +115,6 @@ void test_str6() {
 
 const char *str7 = "1234567890123456,123";
 void test_str7() {
-  tests_run++;
   printf("Testing string 7...\n");
   pool_t pool = next_pool();
   faf_string str = faf_string_init(str7);

@@ -5,17 +5,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#define FAF_STRING_ASSERT_IMPL
-#include "faf_string_assert.h"
-
-#define NDEBUG
-
-int tests_run = 0;
-
-char error_str[10 * 1024];
-
 void test_next_pool() {
-  tests_run++;
   printf("Testing pool initialization...\n");
   pool_t pool = next_pool();
   pool_off_t curr_idx = get_pool_offset(pool);
@@ -26,7 +16,6 @@ void test_next_pool() {
 }
 
 void test_allocations() {
-  tests_run++;
   printf("Testing allocation...\n");
   pool_t pool = next_pool();
 
@@ -49,7 +38,6 @@ void test_allocations() {
 }
 
 void test_string_copy_short() {
-  tests_run++;
   printf("Testing string copy short string (under 16 bytes)...\n");
   pool_t pool = next_pool();
 
@@ -66,7 +54,6 @@ void test_string_copy_short() {
 }
 
 void test_string_copy_long() {
-  tests_run++;
   printf(
       "Testing string copy long string (several multiples of 16 bytes)...\n");
   pool_t pool = next_pool();
@@ -111,7 +98,6 @@ void test_string_copy_long() {
 }
 
 void test_alloc_pool_size_change() {
-  tests_run++;
   printf("Testing allocations properly changes the size of the pool\n");
 
   pool_t pool = next_pool();

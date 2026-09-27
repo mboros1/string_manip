@@ -7,18 +7,8 @@
 #include <stdio.h>
 #include <string.h>
 
-#define FAF_STRING_ASSERT_IMPL
-#include "faf_string_assert.h"
-
-#define NDEBUG
-
-int tests_run = 0;
-
-char error_str[10 * 1024];
-
 const char *str1 = "hello,world";
 void test_str1() {
-  tests_run++;
   printf("Testing string 1...\n");
   pool_t pool = next_pool();
   faf_string str = faf_string_init(str1);

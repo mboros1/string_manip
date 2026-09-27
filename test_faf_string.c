@@ -5,15 +5,6 @@
 #include <stdio.h>
 #include <string.h>
 
-#define FAF_STRING_ASSERT_IMPL
-#include "faf_string_assert.h"
-
-#define NDEBUG
-
-int tests_run = 0;
-
-char error_str[10 * 1024];
-
 // Helper function to print faf_string
 void print_faf_string(faf_string str) {
     printf("faf_string: string=\"%s\", start=%p, end=%p\n", str.start, (void*)str.start, (void *)str.end);
@@ -21,7 +12,6 @@ void print_faf_string(faf_string str) {
 
 // Test function for faf_string_init
 void test_faf_string_init() {
-    tests_run++;
     printf("Testing faf_string_init...\n");
     const char *test_str = "Hello, World!";
     faf_string str = faf_string_init(test_str);
@@ -35,7 +25,6 @@ void test_faf_string_init() {
 
 // Test function for faf_string_init with empty string
 void test_faf_string_init_empty() {
-    tests_run++;
     printf("Testing faf_string_init with empty string...\n");
     const char *test_str = "";
     faf_string str = faf_string_init(test_str);
@@ -49,7 +38,6 @@ void test_faf_string_init_empty() {
 
 // Test function for faf_string_init_n
 void test_faf_string_init_n() {
-    tests_run++;
     printf("Testing faf_string_init_n...\n");
     const char * test_str = "Hello, World!";
     faf_string str = faf_string_init_n(test_str, strlen(test_str));
@@ -63,7 +51,6 @@ void test_faf_string_init_n() {
 
 // Test function for faf_string_init_n with empty string
 void test_faf_string_init_n_empty() {
-    tests_run++;
     printf("Testing faf_string_init_n with empty string...\n");
     const char *test_str = "";
     faf_string str = faf_string_init_n(test_str, strlen(test_str));
