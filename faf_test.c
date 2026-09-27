@@ -77,11 +77,11 @@ int run_test_suite(const char* suite_name) {
             stats.total_tests += test_suites[s].test_count;
             stats.total_suites++;
             
-            // Reset tests_failed before each test
-            tests_failed = 0;
-            
             for (int t = 0; t < test_suites[s].test_count; t++) {
                 test_case_t test = test_suites[s].tests[t];
+
+                // Reset tests_failed before each test
+                tests_failed = 0;
                 clock_t test_start, test_end;
                 
                 // Setup if available
