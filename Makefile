@@ -42,7 +42,7 @@ vpath %.c $(SRC_DIR) $(KERNEL_DIR) $(TEST_DIR) $(TOOLS_DIR)
 
 # Library
 LIB_SRCS = $(KERNEL_DIR)/faf_kernels_ref.c $(KERNEL_DIR)/faf_kernels_simd.c \
-           $(KERNEL_DIR)/faf_kernels_swar.c $(KERNEL_DIR)/faf_kernels_pie.c \
+           $(KERNEL_DIR)/faf_kernels_swar.c \
            $(addprefix $(SRC_DIR)/, \
              faf_string.c faf_string_strlen.c faf_string_mem.c \
              faf_string_cmp.c faf_string_concat.c faf_string_strsplit.c \

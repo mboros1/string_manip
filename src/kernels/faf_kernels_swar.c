@@ -18,8 +18,9 @@
 
 #if defined(FAF_BACKEND_SWAR)
 
-// With the pie backend (ESP32-S3), these five are faf_swar_* instead: the
-// PIE kernels use them for the unaligned ends and for short inputs.
+// With the pie backend (ESP32-S3), these five are exported as faf_swar_*
+// instead (for the benchmarks); the PIE kernels use their inline swar_*
+// bodies for the unaligned ends and for short inputs.
 #if defined(FAF_BACKEND_PIE)
 #define SWAR_KERNEL(name) faf_swar_##name
 #else
@@ -100,8 +101,8 @@ static inline size_t count_lanes(word m) {
 
 /* ---- Scanning ---- */
 
-FAF_NO_ASAN FAF_NO_BUILTIN
-size_t SWAR_KERNEL(strlen)(const char *s) {
+FAF_NO_ASAN FAF_NO_BUILTIN __attribute__((always_inline)) static inline size_t
+swar_strlen(const char *s) {
   const char *p = s;
   for (; !pair_aligned(p); ++p) {
     if (*p == '\0')
@@ -114,8 +115,13 @@ size_t SWAR_KERNEL(strlen)(const char *s) {
   }
 }
 
-FAF_NO_BUILTIN
-size_t SWAR_KERNEL(find_byte)(const char *s, size_t n, char c) {
+FAF_NO_ASAN FAF_NO_BUILTIN
+size_t SWAR_KERNEL(strlen)(const char *s) {
+  return swar_strlen(s);
+}
+
+FAF_NO_BUILTIN __attribute__((always_inline)) static inline size_t
+swar_find_byte(const char *s, size_t n, char c) {
   size_t i = 0;
   for (; i < n && !aligned(s + i); ++i) {
     if (s[i] == c)
@@ -139,6 +145,11 @@ size_t SWAR_KERNEL(find_byte)(const char *s, size_t n, char c) {
       return i;
   }
   return n;
+}
+
+FAF_NO_BUILTIN
+size_t SWAR_KERNEL(find_byte)(const char *s, size_t n, char c) {
+  return swar_find_byte(s, n, c);
 }
 
 FAF_NO_BUILTIN
@@ -168,8 +179,8 @@ size_t faf_k_rfind_byte(const char *s, size_t n, char c) {
   return n;
 }
 
-FAF_NO_BUILTIN
-size_t SWAR_KERNEL(count_byte)(const char *s, size_t n, char c) {
+FAF_NO_BUILTIN __attribute__((always_inline)) static inline size_t
+swar_count_byte(const char *s, size_t n, char c) {
   size_t i = 0, count = 0;
   for (; i < n && !aligned(s + i); ++i)
     count += s[i] == c;
@@ -179,6 +190,11 @@ size_t SWAR_KERNEL(count_byte)(const char *s, size_t n, char c) {
   for (; i < n; ++i)
     count += s[i] == c;
   return count;
+}
+
+FAF_NO_BUILTIN
+size_t SWAR_KERNEL(count_byte)(const char *s, size_t n, char c) {
+  return swar_count_byte(s, n, c);
 }
 
 FAF_NO_BUILTIN
@@ -362,9 +378,14 @@ mismatch(const char *a, const char *b, size_t n, bool icase) {
   return n;
 }
 
+FAF_NO_BUILTIN __attribute__((always_inline)) static inline size_t
+swar_mismatch(const char *a, const char *b, size_t n) {
+  return mismatch(a, b, n, false);
+}
+
 FAF_NO_BUILTIN
 size_t SWAR_KERNEL(mismatch)(const char *a, const char *b, size_t n) {
-  return mismatch(a, b, n, false);
+  return swar_mismatch(a, b, n);
 }
 
 FAF_NO_BUILTIN
@@ -398,8 +419,8 @@ void faf_k_ascii_case(char *dst, const char *src, size_t n, bool upper) {
   }
 }
 
-FAF_NO_BUILTIN
-size_t SWAR_KERNEL(ascii_prefix)(const char *s, size_t n) {
+FAF_NO_BUILTIN __attribute__((always_inline)) static inline size_t
+swar_ascii_prefix(const char *s, size_t n) {
   size_t i = 0;
   for (; i < n && !aligned(s + i); ++i) {
     if ((unsigned char)s[i] >= 0x80)
@@ -417,10 +438,22 @@ size_t SWAR_KERNEL(ascii_prefix)(const char *s, size_t n) {
   return n;
 }
 
+FAF_NO_BUILTIN
+size_t SWAR_KERNEL(ascii_prefix)(const char *s, size_t n) {
+  return swar_ascii_prefix(s, n);
+}
+
 // A word-wide byte swap needs a bswap instruction, which not every CPU has
 // (some get a library call), so reverse stays a byte at a time.
 void faf_k_reverse(char *dst, const char *src, size_t n) {
   faf_ref_reverse(dst, src, n);
 }
+
+// The pie backend (ESP32-S3) builds its kernels in this file, so they can
+// inline the SWAR ones above for their ends: a call per search cost ~23
+// cycles, which made short searches (next_token) 16% slower than plain SWAR.
+#if defined(FAF_BACKEND_PIE)
+#include "faf_kernels_pie.inc"
+#endif
 
 #endif // FAF_BACKEND_SWAR

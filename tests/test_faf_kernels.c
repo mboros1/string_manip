@@ -271,8 +271,8 @@ static void test_transforms(void) {
 
 // Test case definitions
 // Long inputs, which the short tests above don't reach: the PIE kernels
-// (ESP32-S3) scan 32-byte chunks of inputs of 64 bytes and more, and
-// count_byte folds its lane counters every 63 chunks (2016 bytes). Every
+// (ESP32-S3) scan 64-byte chunks after the first ~64-128 bytes, and
+// count_byte folds its lane counters every 31 chunks (1984 bytes). Every
 // backend runs this against the reference.
 #define LONG_LEN 2300
 static char long_a[LONG_LEN + 64], long_b[LONG_LEN + 64];
