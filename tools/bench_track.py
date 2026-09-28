@@ -224,6 +224,10 @@ def cmd_report(args):
            "(higher is better). Machines differ in input sizes (the ESP32 apps "
            "use 400 lines and 8 KB buffers), so compare runs within a machine, "
            "not across machines.", "",
+           "Noise: the ESP32 boards run the library and benchmarks from IRAM and "
+           "repeat within 0.1%. The Mac is noisier: most rows repeat within 3%, "
+           "but rows that read files or call malloc/realloc can move about 5% "
+           "between runs of the same code.", "",
            "## Reproducing", "",
            "```sh",
            "git checkout <commit>",
