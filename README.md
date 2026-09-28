@@ -182,6 +182,12 @@ make bench
 # Only some benchmark groups: strings, alloc, io, kernels
 make bench BENCH_GROUPS="alloc io"
 
+# Record a benchmark run in bench/results/ (summarized in bench/RESULTS.md);
+# commit the code first so the run is tied to a clean commit
+make bench_record
+make esp32_bench_record IDF_TARGET=esp32s3 ESPPORT=/dev/cu.usbmodem101
+python3 tools/bench_track.py compare --machine esp32   # latest two runs
+
 # Any of the above for another backend or architecture, e.g. SSE2 on Apple Silicon
 make OBJ_DIR=obj/x86 BIN_DIR=bin/x86 EXTRA_FLAGS="-arch x86_64" all_tests
 ```

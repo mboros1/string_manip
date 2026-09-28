@@ -6,7 +6,8 @@ set(BENCH_SRCS ${ROOT}/bench/bench_faf_string.c ${ROOT}/bench/bench_common.c
                ${ROOT}/bench/bench_alloc.c)
 
 idf_component_register(SRCS main.c ${LIB_SRCS} ${BENCH_SRCS}
-                       INCLUDE_DIRS ${ROOT}/src ${ROOT}/bench)
+                       INCLUDE_DIRS ${ROOT}/src ${ROOT}/bench
+                       PRIV_REQUIRES esp_hw_support)
 
 # bench_faf_string.c's main() becomes bench_main(), called from app_main()
 set_source_files_properties(${ROOT}/bench/bench_faf_string.c

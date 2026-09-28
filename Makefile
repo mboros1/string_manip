@@ -100,6 +100,17 @@ $(BIN_DIR)/bench_faf_string: $(BENCH_SRCS) $(BENCH_DIR)/bench.h $(LIB_SRCS) $(LI
 bench: $(BIN_DIR)/bench_faf_string
 	@$(BIN_DIR)/bench_faf_string $(BENCH_GROUPS)
 
+# Record a run in bench/results/ and refresh bench/RESULTS.md. Commit the
+# code first, so the run is tied to a clean commit.
+bench_record: $(BIN_DIR)/bench_faf_string
+	@NO_COLOR=1 $(BIN_DIR)/bench_faf_string $(BENCH_GROUPS) | tee $(OBJ_DIR)/bench-host.log
+	@python3 tools/bench_track.py record $(OBJ_DIR)/bench-host.log \
+		--cmd "make bench_record$(if $(BENCH_GROUPS), BENCH_GROUPS=\"$(BENCH_GROUPS)\")"
+	@python3 tools/bench_track.py report
+
+bench_report:
+	@python3 tools/bench_track.py report
+
 # Test framework dependency
 test_framework: $(BIN_DIR) $(OBJ_DIR) $(OBJ_DIR)/faf_test.o
 
@@ -147,6 +158,11 @@ esp32_test:
 
 esp32_bench:
 	@$(ESP32_RUN) --app=bench --groups="$(BENCH_GROUPS)"
+
+esp32_bench_record: esp32_bench
+	@python3 tools/bench_track.py record obj/bench-$(IDF_TARGET).log \
+		--cmd "make esp32_bench_record IDF_TARGET=$(IDF_TARGET)$(if $(BENCH_GROUPS), BENCH_GROUPS=\"$(BENCH_GROUPS)\")"
+	@python3 tools/bench_track.py report
 
 # Built freestanding, the library may import only memcpy, memset, memmove and
 # memcmp, which GCC and Clang require from every environment, plus the
@@ -207,5 +223,6 @@ clean:
 
 .PHONY: all clean all_tests test test_framework test_explorer config bench \
         check_backends check_small check_freestanding esp32_test esp32_bench \
+        esp32_bench_record bench_record bench_report \
         generate_random_strings \
         $(UTIL_TARGETS)
