@@ -11,6 +11,8 @@ CC ?= gcc
 SIMDE_INCLUDE ?=
 CFLAGS ?= -O0 -g
 TEST_FLAGS ?= -O0 -g
+# Benchmarks are always optimized, independent of CFLAGS
+BENCH_FLAGS ?= -O2
 # Appended to every library/test compile and link, e.g.
 #   EXTRA_FLAGS=-DFAF_BACKEND_REF      force the scalar backend
 #   EXTRA_FLAGS="-arch x86_64"         SSE2 backend on Apple Silicon (Rosetta)
@@ -30,7 +32,9 @@ BIN_DIR = bin
 # Library
 LIB_SRCS = faf_kernels_ref.c faf_kernels_simd.c faf_string.c \
            faf_string_strlen.c faf_string_mem.c faf_string_cmp.c \
-           faf_string_concat.c faf_string_strsplit.c
+           faf_string_concat.c faf_string_strsplit.c faf_string_case.c \
+           faf_string_search.c faf_string_view.c faf_string_build.c \
+           faf_string_parse.c faf_string_hash.c faf_string_sort.c
 LIB_OBJS = $(patsubst %.c,$(OBJ_DIR)/%.o,$(LIB_SRCS))
 LIB = $(OBJ_DIR)/libfaf.a
 
@@ -69,6 +73,13 @@ $(UTIL_TARGETS): %: $(SRC_DIR)/%.c | $(BIN_DIR)
 
 generate_random_strings: $(OBJ_DIR)/generate_random_strings.o $(LIB) | $(BIN_DIR)
 	$(CC) $(CFLAGS) $(EXTRA_FLAGS) $^ -o $(BIN_DIR)/$@
+
+# Benchmarks: library sources compiled together at BENCH_FLAGS
+$(BIN_DIR)/bench_faf_string: bench_faf_string.c $(LIB_SRCS) $(wildcard $(SRC_DIR)/faf*.h) | $(BIN_DIR)
+	$(CC) $(BENCH_FLAGS) $(EXTRA_FLAGS) bench_faf_string.c $(LIB_SRCS) -o $@
+
+bench: $(BIN_DIR)/bench_faf_string
+	@$(BIN_DIR)/bench_faf_string
 
 # Test framework dependency
 test_framework: $(BIN_DIR) $(OBJ_DIR) $(OBJ_DIR)/faf_test.o
@@ -116,6 +127,7 @@ config:
 	@echo "CC          = $(CC)"
 	@echo "CFLAGS      = $(CFLAGS)"
 	@echo "TEST_FLAGS  = $(TEST_FLAGS)"
+	@echo "BENCH_FLAGS = $(BENCH_FLAGS)"
 	@echo "EXTRA_FLAGS = $(EXTRA_FLAGS)"
 
 # Clean up
@@ -124,5 +136,5 @@ clean:
 
 -include $(wildcard $(OBJ_DIR)/*.d)
 
-.PHONY: all clean all_tests test test_framework test_explorer config \
+.PHONY: all clean all_tests test test_framework test_explorer config bench \
         check_backends check_freestanding generate_random_strings $(UTIL_TARGETS)

@@ -2,6 +2,8 @@
 #include <stdlib.h>
 #include <time.h>
 
+#include "faf_string_mem.h"
+
 // Function to generate a random alphanumeric character
 char get_random_char() {
     int rand_num = rand() % 62;
@@ -41,18 +43,21 @@ int main(int argc, char *argv[]) {
 
     for (int i = 0; i < num_lines; i++) {
         int length = rand() % 10000 + 1000;
-        char *random_string = malloc(length + 1); // +1 for the null terminator
-        if (!random_string) {
-            perror("Failed to allocate memory");
+        // one region per line: everything for the line is freed together
+        faf_region r = faf_region_acquire();
+        faf_span sp = faf_reserve(r, faf_slots_for(length));
+        if (!sp.ptr) {
+            fprintf(stderr, "Failed to allocate memory\n");
             fclose(file);
             return 1;
         }
+        char *random_string = (char *)sp.ptr;
 
         generate_random_string(random_string, length);
         fprintf(file, "%s", random_string); // Add a null terminator and newline
         fputc('\0', file);
         fputc('\n', file);
-        free(random_string);
+        faf_region_release(r);
     }
 
     fclose(file);
