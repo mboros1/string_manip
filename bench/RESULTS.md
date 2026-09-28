@@ -32,3 +32,35 @@ Apple M1 Max, Darwin 25.0.0, Apple clang version 17.0.0 (clang-1700.6.4.2)
 | run | backend | find_byte | count_byte | strlen | mismatch | find_set | to_lower |
 |---|---|---:|---:|---:|---:|---:|---:|
 | 2026-09-28 `d6237e9b6` benchmark tracking: record runs to bench/results, compare, R | neon | 61,830 | 24,920 | 42,420 | 30,990 | 8,520 | 10,690 |
+
+## esp32
+
+esp32 rev 301, 240 MHz, ESP-IDF v6.1
+
+**Operations, ns (lower is better)**
+
+| run | backend | record, region | record, malloc | split | next_token | split_owned | churn 256 | append 1 B | append 16 B |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| 2026-09-28 `76e2bcd30` ESP32 bench runs from IRAM (flash cache layout made runs inc | swar | 7,625 | 57,252 | 4,400 | 5,815 | 5,200 | 7,326 | 1,451,534 | 144,788 |
+
+**Kernels, MB/s (higher is better)**
+
+| run | backend | find_byte | count_byte | strlen | mismatch | find_set | to_lower |
+|---|---|---:|---:|---:|---:|---:|---:|
+| 2026-09-28 `76e2bcd30` ESP32 bench runs from IRAM (flash cache layout made runs inc | swar | 101 | 56.4 | 119 | 59.9 | 19.2 | 38.3 |
+
+## esp32s3
+
+esp32s3 rev 2, 240 MHz, ESP-IDF v6.1
+
+**Operations, ns (lower is better)**
+
+| run | backend | record, region | record, malloc | split | next_token | split_owned | churn 256 | append 1 B | append 16 B |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| 2026-09-28 `76e2bcd30` ESP32 bench runs from IRAM (flash cache layout made runs inc | swar | 6,855 | 45,892 | 3,850 | 5,035 | 4,650 | 6,743 | 1,201,680 | 130,580 |
+
+**Kernels, MB/s (higher is better)**
+
+| run | backend | find_byte | count_byte | strlen | mismatch | find_set | to_lower |
+|---|---|---:|---:|---:|---:|---:|---:|
+| 2026-09-28 `76e2bcd30` ESP32 bench runs from IRAM (flash cache layout made runs inc | swar | 112 | 59.9 | 136 | 72.3 | 21.8 | 39.9 |
