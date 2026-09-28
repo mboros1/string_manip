@@ -88,27 +88,143 @@ static inline uint32_t chunk_has_high(const char *p) {
 // an out-of-line function with the PIE loop: most searches end in the lead,
 // and a bigger function (more registers to set up per call) cost them ~5%.
 
-__attribute__((noinline)) FAF_NO_BUILTIN static size_t
-find_byte_long(const char *s, size_t n, char c, size_t head) {
-  const unsigned char pat = (unsigned char)c;
-  const char *p = s + head;
-  for (size_t chunks = (n - head) / CHUNK; chunks; --chunks, p += CHUNK) {
-    if (chunk_has(p, &pat))
-      return (size_t)(p - s) + swar_find_byte(p, CHUNK, c);
-  }
-  size_t i = (size_t)(p - s);
-  size_t r = swar_find_byte(p, n - i, c);
-  return r == n - i ? n : i + r;
-}
-
-FAF_NO_BUILTIN
-size_t faf_k_find_byte(const char *s, size_t n, char c) {
-  size_t head = lead(s);
-  if (n < head + CHUNK)
-    return swar_find_byte(s, n, c);
-  size_t r = swar_find_byte(s, head, c);
-  return r != head ? r : find_byte_long(s, n, c, head);
-}
+// find_byte entirely in assembly (windowed ABI: a2 = s, a3 = n, a4 = c), so
+// the hardware loops and the register use don't depend on GCC. Same shape as
+// the C version: SWAR over the lead (64+ bytes to a 64-byte boundary), PIE
+// over whole chunks, SWAR over a matching chunk and over the tail. Inputs
+// shorter than lead + one chunk are scanned by SWAR only.
+//
+// Registers: a2 s, a3 n, a4 c, a5 cursor, a6 end of the SWAR range,
+// a7 c in every lane, a10 0x7f7f7f7f, a11 -1, a12 nonzero once the scan may
+// only end the search (short input, rescan, tail), a8/a9/a13-a15 temporaries.
+__asm__(
+    ".pushsection .text.faf_k_find_byte,\"ax\",@progbits\n"
+    ".align 4\n"
+    ".global faf_k_find_byte\n"
+    ".type faf_k_find_byte,@function\n"
+    "faf_k_find_byte:\n"
+    "  entry   a1, 32\n"
+    "  extui   a4, a4, 0, 8\n"
+    "  slli    a8, a4, 8\n"
+    "  or      a7, a4, a8\n"
+    "  slli    a8, a7, 16\n"
+    "  or      a7, a7, a8\n"
+    "  movi    a10, 0x7f7f7f7f\n"
+    "  movi    a11, -1\n"
+    "  neg     a8, a2\n"
+    "  extui   a8, a8, 0, 6\n"           // to_chunk(s)
+    "  addi    a8, a8, 64\n"             // head
+    "  addi    a9, a8, 64\n"             // head + CHUNK
+    "  mov     a5, a2\n"
+    "  add     a6, a2, a3\n"             // end
+    "  movi    a12, 1\n"
+    "  bltu    a3, a9, .Lfb_scan\n"      // short: SWAR over everything
+    "  add     a6, a2, a8\n"             // lead end
+    "  movi    a12, 0\n"
+    // SWAR over [a5, a6): match -> .Lfb_found, else .Lfb_done
+    ".Lfb_scan:\n"
+    ".Lfb_bytes:\n"
+    "  bgeu    a5, a6, .Lfb_done\n"
+    "  extui   a8, a5, 0, 2\n"
+    "  beqz    a8, .Lfb_words\n"
+    "  l8ui    a9, a5, 0\n"
+    "  beq     a9, a4, .Lfb_found\n"
+    "  addi    a5, a5, 1\n"
+    "  j       .Lfb_bytes\n"
+    ".Lfb_words:\n"
+    "  sub     a8, a6, a5\n"
+    "  srli    a13, a8, 3\n"         // pairs of words
+    "  beqz    a13, .Lfb_single\n"
+    "  loop    a13, .Lfb_pairs_end\n"
+    "  l32i    a8, a5, 0\n"
+    "  l32i    a9, a5, 4\n"
+    "  xor     a8, a8, a7\n"
+    "  xor     a9, a9, a7\n"
+    "  and     a14, a8, a10\n"
+    "  and     a15, a9, a10\n"
+    "  add     a14, a14, a10\n"
+    "  add     a15, a15, a10\n"
+    "  or      a14, a14, a8\n"
+    "  or      a15, a15, a9\n"
+    "  or      a14, a14, a10\n"
+    "  or      a15, a15, a10\n"
+    "  bnall   a14, a11, .Lfb_hit0\n"
+    "  bnall   a15, a11, .Lfb_hit1\n"
+    "  addi    a5, a5, 8\n"
+    ".Lfb_pairs_end:\n"
+    ".Lfb_single:\n"
+    "  sub     a8, a6, a5\n"
+    "  bltui   a8, 4, .Lfb_tail\n"
+    "  l32i    a8, a5, 0\n"
+    "  xor     a8, a8, a7\n"
+    "  and     a14, a8, a10\n"
+    "  add     a14, a14, a10\n"
+    "  or      a14, a14, a8\n"
+    "  or      a14, a14, a10\n"
+    "  bnall   a14, a11, .Lfb_hit0\n"
+    "  addi    a5, a5, 4\n"
+    ".Lfb_tail:\n"
+    "  bgeu    a5, a6, .Lfb_done\n"
+    "  l8ui    a9, a5, 0\n"
+    "  beq     a9, a4, .Lfb_found\n"
+    "  addi    a5, a5, 1\n"
+    "  j       .Lfb_tail\n"
+    ".Lfb_hit1:\n"
+    "  addi    a5, a5, 4\n"
+    "  mov     a14, a15\n"
+    ".Lfb_hit0:\n"                        // a14: ~mask, lanes of a match
+    "  xor     a14, a14, a11\n"
+    "  neg     a8, a14\n"
+    "  and     a8, a8, a14\n"             // lowest set bit
+    "  nsau    a8, a8\n"
+    "  movi    a9, 31\n"
+    "  sub     a8, a9, a8\n"
+    "  srli    a8, a8, 3\n"
+    "  add     a5, a5, a8\n"
+    ".Lfb_found:\n"
+    "  sub     a2, a5, a2\n"
+    "  retw\n"
+    ".Lfb_done:\n"
+    "  bnez    a12, .Lfb_none\n"
+    // PIE over whole chunks from a5 (64-byte aligned)
+    "  add     a6, a2, a3\n"
+    "  sub     a8, a6, a5\n"
+    "  srli    a13, a8, 6\n"         // chunks, at least 1
+    "  s8i     a4, a1, 0\n"
+    "  ee.vldbc.8 q7, a1\n"
+    "  loop    a13, .Lfb_chunks_end\n"
+    "  ee.vld.128.ip q0, a5, 16\n"
+    "  ee.vld.128.ip q1, a5, 16\n"
+    "  ee.vld.128.ip q2, a5, 16\n"
+    "  ee.vld.128.ip q3, a5, 16\n"
+    "  ee.vcmp.eq.s8 q0, q0, q7\n"
+    "  ee.vcmp.eq.s8 q1, q1, q7\n"
+    "  ee.vcmp.eq.s8 q2, q2, q7\n"
+    "  ee.vcmp.eq.s8 q3, q3, q7\n"
+    "  ee.orq  q0, q0, q1\n"
+    "  ee.orq  q2, q2, q3\n"
+    "  ee.orq  q0, q0, q2\n"
+    "  ee.movi.32.a q0, a8, 0\n"
+    "  ee.movi.32.a q0, a9, 1\n"
+    "  ee.movi.32.a q0, a14, 2\n"
+    "  ee.movi.32.a q0, a15, 3\n"
+    "  or      a8, a8, a9\n"
+    "  or      a14, a14, a15\n"
+    "  or      a8, a8, a14\n"
+    "  bnez    a8, .Lfb_chunk_hit\n"
+    ".Lfb_chunks_end:\n"
+    "  movi    a12, 1\n"                 // tail: a6 is the end
+    "  j       .Lfb_scan\n"
+    ".Lfb_chunk_hit:\n"
+    "  addi    a5, a5, -64\n"
+    "  addi    a6, a5, 64\n"
+    "  movi    a12, 1\n"
+    "  j       .Lfb_scan\n"
+    ".Lfb_none:\n"
+    "  mov     a2, a3\n"
+    "  retw\n"
+    ".size faf_k_find_byte, .-faf_k_find_byte\n"
+    ".popsection\n");
 
 // Reads to the end of the aligned chunk holding the NUL, which never crosses
 // a page
