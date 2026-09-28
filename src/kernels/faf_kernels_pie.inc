@@ -4,7 +4,8 @@
 // PIE kernels for the ESP32-S3 (pie backend): the scanning kernels with its
 // 128-bit vector instructions. Everything else is the SWAR backend.
 //
-// PIE has no C intrinsics, so the vector work is inline assembly. Each asm
+// PIE has no C intrinsics, so the vector work is assembly. find_byte and
+// strlen are whole functions in assembly (see there); elsewhere each asm
 // block is self-contained (it loads its own pattern and moves its results to
 // address registers), except count_byte's accumulator, see there. GCC never
 // uses the q registers; FreeRTOS saves them on task switches like the FPU.
@@ -84,15 +85,17 @@ static inline uint32_t chunk_has_high(const char *p) {
   return w0 | w1 | w2 | w3;
 }
 
-// Each early-exit kernel is a small entry that runs the SWAR lead inline, and
-// an out-of-line function with the PIE loop: most searches end in the lead,
-// and a bigger function (more registers to set up per call) cost them ~5%.
-
 // find_byte entirely in assembly (windowed ABI: a2 = s, a3 = n, a4 = c), so
 // the hardware loops and the register use don't depend on GCC. Same shape as
 // the C version: SWAR over the lead (64+ bytes to a 64-byte boundary), PIE
 // over whole chunks, SWAR over a matching chunk and over the tail. Inputs
-// shorter than lead + one chunk are scanned by SWAR only.
+// shorter than lead + one chunk are scanned by SWAR only. In C, how GCC
+// compiled the lead (hardware loop or not) decided short-input speed; here it
+// is fixed, and short searches are faster than plain SWAR.
+//
+// strlen is a second entry: find_byte of '\0' with n = SIZE_MAX. The end
+// pointer wraps, so the chunk loop runs until the NUL, reading at most to the
+// end of its aligned chunk (never across a page).
 //
 // Registers: a2 s, a3 n, a4 c, a5 cursor, a6 end of the SWAR range,
 // a7 c in every lane, a10 0x7f7f7f7f, a11 -1, a12 nonzero once the scan may
@@ -104,6 +107,7 @@ __asm__(
     ".type faf_k_find_byte,@function\n"
     "faf_k_find_byte:\n"
     "  entry   a1, 32\n"
+    ".Lfb_start:\n"
     "  extui   a4, a4, 0, 8\n"
     "  slli    a8, a4, 8\n"
     "  or      a7, a4, a8\n"
@@ -224,25 +228,16 @@ __asm__(
     "  mov     a2, a3\n"
     "  retw\n"
     ".size faf_k_find_byte, .-faf_k_find_byte\n"
+    ".align 4\n"
+    ".global faf_k_strlen\n"
+    ".type faf_k_strlen,@function\n"
+    "faf_k_strlen:\n"
+    "  entry   a1, 32\n"
+    "  movi    a3, -1\n"
+    "  movi    a4, 0\n"
+    "  j       .Lfb_start\n"
+    ".size faf_k_strlen, .-faf_k_strlen\n"
     ".popsection\n");
-
-// Reads to the end of the aligned chunk holding the NUL, which never crosses
-// a page
-__attribute__((noinline)) FAF_NO_ASAN FAF_NO_BUILTIN static size_t
-strlen_long(const char *s, size_t head) {
-  const unsigned char zero = 0;
-  for (const char *p = s + head;; p += CHUNK) {
-    if (chunk_has(p, &zero))
-      return (size_t)(p - s) + swar_strlen(p);
-  }
-}
-
-FAF_NO_ASAN FAF_NO_BUILTIN
-size_t faf_k_strlen(const char *s) {
-  size_t head = lead(s);
-  size_t r = swar_find_byte(s, head, '\0');
-  return r != head ? r : strlen_long(s, head);
-}
 
 // Sum of the bytes of w, each at most 126
 static inline size_t byte_sum(uint32_t w) {
@@ -348,6 +343,9 @@ static inline uint32_t equal_unaligned(const char *a, const char *b) {
   return w0 & w1 & w2 & w3;
 }
 
+// mismatch and ascii_prefix are still C: a small entry that runs the SWAR
+// lead inline, and an out-of-line function with the PIE loop (most calls end
+// in the lead, and a bigger function cost them ~5% in register setup)
 __attribute__((noinline)) FAF_NO_BUILTIN static size_t
 mismatch_long(const char *a, const char *b, size_t n, size_t i) {
   bool b_aligned = (((uintptr_t)(b + i)) & 15) == 0;
