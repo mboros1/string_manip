@@ -1,90 +1,35 @@
-// Included by faf_kernels_swar.c (not compiled on its own), so the SWAR
-// kernels inline.
+#include "faf_kernels.h"
+
+#if defined(FAF_BACKEND_PIE)
+
+// PIE kernels for the ESP32-S3 (pie backend): the scanning kernels, each a
+// whole function in assembly, using the 128-bit PIE vector instructions for
+// long inputs. Everything else is the SWAR backend.
 //
-// PIE kernels for the ESP32-S3 (pie backend): the scanning kernels with its
-// 128-bit vector instructions. Everything else is the SWAR backend.
+// Why assembly: PIE has no C intrinsics, and on this in-order core with no
+// branch prediction, short inputs are decided by details GCC does not keep
+// stable: whether a loop becomes a hardware loop, what gets inlined, call
+// overhead. With the C entry points short searches were up to 19% slower than
+// plain SWAR; in assembly they are faster.
 //
-// PIE has no C intrinsics, so the vector work is assembly. find_byte,
-// find_bytes, strlen and mismatch are whole functions in assembly (see
-// there); elsewhere each asm block is self-contained (it loads its own
-// pattern and moves its results to address registers), except count_byte's
-// accumulator, see there. GCC never uses the q registers; FreeRTOS saves
-// them on task switches like the FPU.
+// Shape: word loops over a lead (64+ bytes, to an aligned address), PIE over
+// aligned 64-byte chunks (four blocks; they never cross a page), word loops
+// over a chunk with a match (to find where) and over the tail. Most searches
+// end in the lead (the next separator, the end of a short string), where
+// words are cheaper than a chunk plus a rescan. PIE has no movemask, so a
+// chunk's compare result comes out as four 32-bit words.
 //
-// Shape: the SWAR kernels handle the first 64 bytes or so (to a 64-byte
-// aligned address) and the part after the last whole chunk; the asm scans
-// aligned 64-byte chunks (four blocks, so the loop around each costs little),
-// which never cross a page. A chunk with
-// a match is searched again with SWAR to find where. PIE has no movemask, so
-// a chunk's compare result comes out as four 32-bit words.
+// Word loops test each byte with its own branch (BNONE on a mask, BBSI on a
+// bit), like newlib's strlen in the ROM: untaken branches are cheap here, and
+// the branch taken says which byte. The pointer bump goes between a load and
+// its first use (a load's result is not ready on the next cycle).
 //
-// The SWAR start is that long on purpose: most searches stop early (the next
-// separator, the end of a short string), and there SWAR is cheaper than a
-// chunk plus a rescan. Switching after only a few bytes made next_token 28%
-// slower.
-
-
-#define CHUNK 64
-// SWAR covers at least this much before the PIE chunks start
-#define SWAR_LEAD 64
-
-static inline size_t to_chunk(const char *p) {
-  return (size_t)(-(uintptr_t)p & (CHUNK - 1));
-}
-
-// Offset of the first PIE chunk: SWAR_LEAD bytes, then to a chunk boundary
-static inline size_t lead(const char *s) {
-  return SWAR_LEAD + to_chunk(s + SWAR_LEAD);
-}
-
-// Nonzero if any byte of the aligned chunk at p equals *pat
-static inline uint32_t chunk_has(const char *p, const unsigned char *pat) {
-  uint32_t w0, w1, w2, w3;
-  __asm__("ee.vldbc.8     q7, %[pat]\n\t"
-          "ee.vld.128.ip  q0, %[p], 16\n\t"
-          "ee.vld.128.ip  q1, %[p], 16\n\t"
-          "ee.vld.128.ip  q2, %[p], 16\n\t"
-          "ee.vld.128.ip  q3, %[p], 16\n\t"
-          "ee.vcmp.eq.s8  q0, q0, q7\n\t"
-          "ee.vcmp.eq.s8  q1, q1, q7\n\t"
-          "ee.vcmp.eq.s8  q2, q2, q7\n\t"
-          "ee.vcmp.eq.s8  q3, q3, q7\n\t"
-          "ee.orq         q0, q0, q1\n\t"
-          "ee.orq         q2, q2, q3\n\t"
-          "ee.orq         q0, q0, q2\n\t"
-          "ee.movi.32.a   q0, %[w0], 0\n\t"
-          "ee.movi.32.a   q0, %[w1], 1\n\t"
-          "ee.movi.32.a   q0, %[w2], 2\n\t"
-          "ee.movi.32.a   q0, %[w3], 3"
-          : [p] "+r"(p), [w0] "=r"(w0), [w1] "=r"(w1), [w2] "=r"(w2),
-            [w3] "=r"(w3)
-          : [pat] "r"(pat)
-          : "memory");
-  return w0 | w1 | w2 | w3;
-}
-
-// Nonzero if any byte of the aligned chunk at p is >= 0x80
-static inline uint32_t chunk_has_high(const char *p) {
-  uint32_t w0, w1, w2, w3;
-  __asm__("ee.zero.q      q7\n\t"
-          "ee.vld.128.ip  q0, %[p], 16\n\t"
-          "ee.vld.128.ip  q1, %[p], 16\n\t"
-          "ee.vld.128.ip  q2, %[p], 16\n\t"
-          "ee.vld.128.ip  q3, %[p], 16\n\t"
-          "ee.orq         q0, q0, q1\n\t" // a byte's high bit survives the ORs
-          "ee.orq         q2, q2, q3\n\t"
-          "ee.orq         q0, q0, q2\n\t"
-          "ee.vcmp.lt.s8  q0, q0, q7\n\t" // signed: bytes >= 0x80 are < 0
-          "ee.movi.32.a   q0, %[w0], 0\n\t"
-          "ee.movi.32.a   q0, %[w1], 1\n\t"
-          "ee.movi.32.a   q0, %[w2], 2\n\t"
-          "ee.movi.32.a   q0, %[w3], 3"
-          : [p] "+r"(p), [w0] "=r"(w0), [w1] "=r"(w1), [w2] "=r"(w2),
-            [w3] "=r"(w3)
-          :
-          : "memory");
-  return w0 | w1 | w2 | w3;
-}
+// Hardware loops: a search that ends a LOOP early leaves LCOUNT nonzero; a
+// later branch to that loop's end does not loop back (only falling through
+// does; tested by Kernels.after_exit). GCC never uses the q registers;
+// FreeRTOS saves them on task switches like the FPU. Functions using a stack
+// slot at a1 reserve 32 bytes (entry a1, 32): the 16 above a1 belong to the
+// caller's register save area otherwise.
 
 // find_byte entirely in assembly (windowed ABI: a2 = s, a3 = n, a4 = c), so
 // the hardware loops and the register use don't depend on GCC. Words over the
@@ -438,61 +383,130 @@ __asm__(
     ".popsection\n");
 #undef FAF_STRLEN_WORDS
 
-// Sum of the bytes of w, each at most 126
-static inline size_t byte_sum(uint32_t w) {
-  uint32_t t = (w & 0x00FF00FFu) + ((w >> 8) & 0x00FF00FFu);
-  return (t + (t >> 16)) & 0xFFFFu;
-}
-
-// Counts accumulate per lane in q6, up to 4 per chunk, so q6 is summed and
-// cleared every 31 chunks (before a lane passes 127). q6 is the one register
-// kept across asm statements, between the zeroing, the chunk loop and the sum;
-// nothing in between touches the q registers.
-FAF_NO_BUILTIN
-size_t faf_k_count_byte(const char *s, size_t n, char c) {
-  // no early exit: a short SWAR start is fine here
-  if (n < 2 * CHUNK)
-    return swar_count_byte(s, n, c);
-  size_t head = to_chunk(s);
-  size_t count = swar_count_byte(s, head, c);
-  const unsigned char pat = (unsigned char)c;
-  const char *p = s + head;
-  size_t chunks = (n - head) / CHUNK;
-  while (chunks) {
-    size_t run = chunks < 31 ? chunks : 31;
-    chunks -= run;
-    __asm__ volatile("ee.zero.q q6" ::: "memory");
-    for (; run; --run) {
-      __asm__ volatile("ee.vldbc.8     q7, %[pat]\n\t"
-                       "ee.vld.128.ip  q0, %[p], 16\n\t"
-                       "ee.vld.128.ip  q1, %[p], 16\n\t"
-                       "ee.vld.128.ip  q2, %[p], 16\n\t"
-                       "ee.vld.128.ip  q3, %[p], 16\n\t"
-                       "ee.vcmp.eq.s8  q0, q0, q7\n\t" // 0 or -1 per lane
-                       "ee.vcmp.eq.s8  q1, q1, q7\n\t"
-                       "ee.vcmp.eq.s8  q2, q2, q7\n\t"
-                       "ee.vcmp.eq.s8  q3, q3, q7\n\t"
-                       "ee.vadds.s8    q0, q0, q1\n\t"
-                       "ee.vadds.s8    q2, q2, q3\n\t"
-                       "ee.vadds.s8    q0, q0, q2\n\t" // -4 .. 0
-                       "ee.vsubs.s8    q6, q6, q0"     // count up
-                       : [p] "+r"(p)
-                       : [pat] "r"(&pat)
-                       : "memory");
-    }
-    uint32_t w0, w1, w2, w3;
-    __asm__ volatile("ee.movi.32.a q6, %[w0], 0\n\t"
-                     "ee.movi.32.a q6, %[w1], 1\n\t"
-                     "ee.movi.32.a q6, %[w2], 2\n\t"
-                     "ee.movi.32.a q6, %[w3], 3"
-                     : [w0] "=r"(w0), [w1] "=r"(w1), [w2] "=r"(w2), [w3] "=r"(w3)
-                     :
-                     : "memory");
-    count += byte_sum(w0) + byte_sum(w1) + byte_sum(w2) + byte_sum(w3);
-  }
-  size_t i = (size_t)(p - s);
-  return count + swar_count_byte(p, n - i, c);
-}
+// count_byte in assembly (a2 = s, a3 = n, a4 = c): words to a 64-byte
+// boundary (inputs under 128 bytes: words only), PIE over whole chunks, words
+// over the tail. The word loops add each word's non-matching lanes (bit 7 of
+// ((x & 0x7f..) + 0x7f..) | x, with x the word XOR c) as 0/1 bytes into a15;
+// a word range is at most 32 words, so a lane never passes 32, and matches
+// are 4 * words minus the sum of a15's bytes. The chunk loop counts per lane
+// in q6, up to 4 per chunk, in runs of at most 15 chunks: the four words of
+// q6 then add up to at most 240 per lane.
+//
+// Registers: a2 s, a4 c, a5 cursor, a6 end of the word range, a7 c in every
+// lane, a10 0x7f7f7f7f, a11 0x01010101, a12 nonzero once only the tail is
+// left, a14 the count, a3 (n, then the chunks left), a8/a9/a13/a15
+// temporaries.
+__asm__(
+    ".pushsection .text.faf_k_count_byte,\"ax\",@progbits\n"
+    ".align 4\n"
+    ".global faf_k_count_byte\n"
+    ".type faf_k_count_byte,@function\n"
+    "faf_k_count_byte:\n"
+    "  entry   a1, 32\n"
+    "  extui   a4, a4, 0, 8\n"
+    "  slli    a8, a4, 8\n"
+    "  or      a7, a4, a8\n"
+    "  slli    a8, a7, 16\n"
+    "  or      a7, a7, a8\n"
+    "  movi    a10, 0x7f7f7f7f\n"
+    "  movi    a11, 0x01010101\n"
+    "  movi    a14, 0\n"
+    "  mov     a5, a2\n"
+    "  add     a6, a2, a3\n"             // end
+    "  movi    a12, 1\n"
+    "  bltui   a3, 128, .Lcb_scan\n"     // short: words over everything
+    "  neg     a8, a2\n"
+    "  extui   a8, a8, 0, 6\n"
+    "  add     a6, a2, a8\n"             // first chunk
+    "  movi    a12, 0\n"
+    // count over [a5, a6), then .Lcb_done
+    ".Lcb_scan:\n"
+    "  bgeu    a5, a6, .Lcb_done\n"
+    "  extui   a8, a5, 0, 2\n"
+    "  beqz    a8, .Lcb_words\n"
+    "  l8ui    a9, a5, 0\n"
+    "  addi    a5, a5, 1\n"
+    "  bne     a9, a4, .Lcb_scan\n"
+    "  addi    a14, a14, 1\n"
+    "  j       .Lcb_scan\n"
+    ".Lcb_words:\n"
+    "  sub     a8, a6, a5\n"
+    "  srli    a13, a8, 2\n"
+    "  beqz    a13, .Lcb_tail\n"
+    "  movi    a15, 0\n"
+    "  addx4   a14, a13, a14\n"          // + 4 per word, less the non-matches
+    "  loop    a13, .Lcb_words_end\n"
+    "  l32i    a8, a5, 0\n"
+    "  addi    a5, a5, 4\n"              // between the load and its use
+    "  xor     a8, a8, a7\n"
+    "  and     a9, a8, a10\n"
+    "  add     a9, a9, a10\n"
+    "  or      a9, a9, a8\n"             // bit 7 of a lane: nonzero
+    "  srli    a9, a9, 7\n"
+    "  and     a9, a9, a11\n"
+    "  add     a15, a15, a9\n"
+    ".Lcb_words_end:\n"
+    "  mull    a15, a15, a11\n"          // lane sum in the top byte
+    "  extui   a15, a15, 24, 8\n"
+    "  sub     a14, a14, a15\n"
+    ".Lcb_tail:\n"
+    "  bgeu    a5, a6, .Lcb_done\n"
+    "  l8ui    a9, a5, 0\n"
+    "  addi    a5, a5, 1\n"
+    "  bne     a9, a4, .Lcb_tail\n"
+    "  addi    a14, a14, 1\n"
+    "  j       .Lcb_tail\n"
+    ".Lcb_done:\n"
+    "  bnez    a12, .Lcb_ret\n"
+    // PIE over whole chunks from a5 (64-byte aligned)
+    "  add     a6, a2, a3\n"             // end, for the tail
+    "  sub     a8, a6, a5\n"
+    "  srli    a3, a8, 6\n"              // chunks, at least 1
+    "  s8i     a4, a1, 0\n"
+    "  ee.vldbc.8 q7, a1\n"
+    ".Lcb_run:\n"
+    "  movi    a13, 15\n"
+    "  minu    a13, a13, a3\n"
+    "  sub     a3, a3, a13\n"
+    "  ee.zero.q q6\n"
+    "  loop    a13, .Lcb_chunks_end\n"
+    "  ee.vld.128.ip q0, a5, 16\n"
+    "  ee.vld.128.ip q1, a5, 16\n"
+    "  ee.vld.128.ip q2, a5, 16\n"
+    "  ee.vld.128.ip q3, a5, 16\n"
+    "  ee.vcmp.eq.s8 q0, q0, q7\n"       // 0 or -1 per lane
+    "  ee.vcmp.eq.s8 q1, q1, q7\n"
+    "  ee.vcmp.eq.s8 q2, q2, q7\n"
+    "  ee.vcmp.eq.s8 q3, q3, q7\n"
+    "  ee.vadds.s8 q0, q0, q1\n"
+    "  ee.vadds.s8 q2, q2, q3\n"
+    "  ee.vadds.s8 q0, q0, q2\n"         // -4 .. 0
+    "  ee.vsubs.s8 q6, q6, q0\n"         // count up
+    ".Lcb_chunks_end:\n"
+    "  ee.movi.32.a q6, a8, 0\n"
+    "  ee.movi.32.a q6, a9, 1\n"
+    "  ee.movi.32.a q6, a13, 2\n"
+    "  ee.movi.32.a q6, a15, 3\n"
+    "  add     a8, a8, a9\n"
+    "  add     a13, a13, a15\n"
+    "  add     a8, a8, a13\n"            // at most 240 per lane
+    "  movi    a9, 0x00ff00ff\n"
+    "  and     a13, a8, a9\n"
+    "  srli    a8, a8, 8\n"
+    "  and     a8, a8, a9\n"
+    "  add     a8, a8, a13\n"            // two 16-bit sums
+    "  extui   a13, a8, 16, 16\n"
+    "  add     a8, a8, a13\n"
+    "  extui   a8, a8, 0, 16\n"
+    "  add     a14, a14, a8\n"
+    "  bnez    a3, .Lcb_run\n"
+    "  movi    a12, 1\n"                 // tail: a6 is the end
+    "  j       .Lcb_scan\n"
+    ".Lcb_ret:\n"
+    "  mov     a2, a14\n"
+    "  retw\n"
+    ".size faf_k_count_byte, .-faf_k_count_byte\n"
+    ".popsection\n");
 
 // mismatch in assembly (a2 = a, a3 = b, a4 = n), the same shape as find_byte:
 // words over the lead (64+ bytes, to a 16-byte aligned a), PIE over 32-byte
@@ -658,26 +672,105 @@ __asm__(
     ".size faf_k_mismatch, .-faf_k_mismatch\n"
     ".popsection\n");
 
-// ascii_prefix is still C: a small entry that runs the SWAR lead inline, and
-// an out-of-line function with the PIE loop (most calls end in the lead, and
-// a bigger function cost them ~5% in register setup)
-__attribute__((noinline)) FAF_NO_BUILTIN static size_t
-ascii_prefix_long(const char *s, size_t n, size_t head) {
-  const char *p = s + head;
-  for (size_t chunks = (n - head) / CHUNK; chunks; --chunks, p += CHUNK) {
-    if (chunk_has_high(p))
-      return (size_t)(p - s) + swar_ascii_prefix(p, CHUNK);
-  }
-  size_t i = (size_t)(p - s);
-  return i + swar_ascii_prefix(p, n - i);
-}
+// ascii_prefix in assembly (a2 = s, a3 = n), the same shape as find_byte:
+// words over the lead, PIE over whole chunks, words over a chunk holding a
+// high byte and over the tail. A word's bytes are tested with BBSI on bits 7,
+// 15, 23 and 31: one instruction each, no masks.
+//
+// Registers: a2 s, a5 cursor, a6 end of the word range, a12 nonzero once the
+// scan may only end the search, a3 (n, until the end pointer is known),
+// a8/a9/a13 temporaries.
+__asm__(
+    ".pushsection .text.faf_k_ascii_prefix,\"ax\",@progbits\n"
+    ".align 4\n"
+    ".global faf_k_ascii_prefix\n"
+    ".type faf_k_ascii_prefix,@function\n"
+    "faf_k_ascii_prefix:\n"
+    "  entry   a1, 32\n"
+    "  neg     a8, a2\n"
+    "  extui   a8, a8, 0, 6\n"           // to_chunk(s)
+    "  addi    a8, a8, 64\n"             // head
+    "  addi    a9, a8, 64\n"             // head + CHUNK
+    "  mov     a5, a2\n"
+    "  add     a6, a2, a3\n"             // end
+    "  movi    a12, 1\n"
+    "  bltu    a3, a9, .Lap_scan\n"      // short: words over everything
+    "  add     a6, a2, a8\n"             // lead end
+    "  movi    a12, 0\n"
+    // words over [a5, a6): high byte -> .Lap_found, else .Lap_done
+    ".Lap_scan:\n"
+    "  bgeu    a5, a6, .Lap_done\n"
+    "  extui   a8, a5, 0, 2\n"
+    "  beqz    a8, .Lap_words\n"
+    "  l8ui    a9, a5, 0\n"
+    "  bbsi    a9, 7, .Lap_found\n"
+    "  addi    a5, a5, 1\n"
+    "  j       .Lap_scan\n"
+    ".Lap_words:\n"
+    "  sub     a8, a6, a5\n"
+    "  srli    a13, a8, 2\n"
+    "  beqz    a13, .Lap_tail\n"
+    "  loop    a13, .Lap_words_end\n"
+    "  l32i    a8, a5, 0\n"
+    "  addi    a5, a5, 4\n"              // between the load and its use
+    "  bbsi    a8, 7, .Lap_w0\n"
+    "  bbsi    a8, 15, .Lap_w1\n"
+    "  bbsi    a8, 23, .Lap_w2\n"
+    "  bbsi    a8, 31, .Lap_w3\n"
+    ".Lap_words_end:\n"
+    ".Lap_tail:\n"
+    "  bgeu    a5, a6, .Lap_done\n"
+    "  l8ui    a9, a5, 0\n"
+    "  bbsi    a9, 7, .Lap_found\n"
+    "  addi    a5, a5, 1\n"
+    "  j       .Lap_tail\n"
+    ".Lap_w0:\n"                         // byte k of the word before a5
+    "  addi    a5, a5, -1\n"
+    ".Lap_w1:\n"
+    "  addi    a5, a5, -1\n"
+    ".Lap_w2:\n"
+    "  addi    a5, a5, -1\n"
+    ".Lap_w3:\n"
+    "  addi    a5, a5, -1\n"
+    ".Lap_found:\n"
+    "  sub     a2, a5, a2\n"
+    "  retw\n"
+    ".Lap_done:\n"
+    "  bnez    a12, .Lap_none\n"
+    // PIE over whole chunks from a5 (64-byte aligned)
+    "  add     a6, a2, a3\n"             // end, for the tail
+    "  sub     a8, a6, a5\n"
+    "  srli    a13, a8, 6\n"             // chunks, at least 1
+    "  ee.zero.q q7\n"
+    "  loop    a13, .Lap_chunks_end\n"
+    "  ee.vld.128.ip q0, a5, 16\n"
+    "  ee.vld.128.ip q1, a5, 16\n"
+    "  ee.vld.128.ip q2, a5, 16\n"
+    "  ee.vld.128.ip q3, a5, 16\n"
+    "  ee.orq  q0, q0, q1\n"             // a byte's high bit survives the ORs
+    "  ee.orq  q2, q2, q3\n"
+    "  ee.orq  q0, q0, q2\n"
+    "  ee.vcmp.lt.s8 q0, q0, q7\n"       // signed: bytes >= 0x80 are < 0
+    "  ee.movi.32.a q0, a8, 0\n"
+    "  ee.movi.32.a q0, a9, 1\n"
+    "  ee.movi.32.a q0, a3, 2\n"         // n is no longer needed
+    "  ee.movi.32.a q0, a13, 3\n"        // the loop count is in LCOUNT
+    "  or      a8, a8, a9\n"
+    "  or      a3, a3, a13\n"
+    "  or      a8, a8, a3\n"
+    "  bnez    a8, .Lap_chunk_hit\n"
+    ".Lap_chunks_end:\n"
+    "  movi    a12, 1\n"                 // tail: a6 is the end
+    "  j       .Lap_scan\n"
+    ".Lap_chunk_hit:\n"
+    "  addi    a5, a5, -64\n"
+    "  addi    a6, a5, 64\n"
+    "  movi    a12, 1\n"
+    "  j       .Lap_words\n"
+    ".Lap_none:\n"                       // a6 is the end: s + n
+    "  sub     a2, a6, a2\n"
+    "  retw\n"
+    ".size faf_k_ascii_prefix, .-faf_k_ascii_prefix\n"
+    ".popsection\n");
 
-FAF_NO_BUILTIN
-size_t faf_k_ascii_prefix(const char *s, size_t n) {
-  size_t head = lead(s);
-  if (n < head + CHUNK)
-    return swar_ascii_prefix(s, n);
-  size_t r = swar_ascii_prefix(s, head);
-  return r != head ? r : ascii_prefix_long(s, n, head);
-}
-
+#endif // FAF_BACKEND_PIE

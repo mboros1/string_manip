@@ -449,11 +449,4 @@ void faf_k_reverse(char *dst, const char *src, size_t n) {
   faf_ref_reverse(dst, src, n);
 }
 
-// The pie backend (ESP32-S3) builds its kernels in this file, so they can
-// inline the SWAR ones above for their ends: a call per search cost ~23
-// cycles, which made short searches (next_token) 16% slower than plain SWAR.
-#if defined(FAF_BACKEND_PIE)
-#include "faf_kernels_pie.inc"
-#endif
-
 #endif // FAF_BACKEND_SWAR

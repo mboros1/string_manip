@@ -21,6 +21,7 @@ entries:
     faf_kernels_ref (noflash)
     faf_kernels_simd (noflash)
     faf_kernels_swar (noflash)
+    faf_kernels_pie (noflash)
     bench_faf_string (noflash)
     bench_common (noflash)
     bench_alloc (noflash)
