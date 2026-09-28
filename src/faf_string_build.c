@@ -40,7 +40,7 @@ static inline char *builder_end(faf_builder *b) {
   return (char *)b->sp.ptr + b->len;
 }
 
-bool faf_builder_append(faf_builder *b, faf_string str) {
+bool faf_builder_append_grow(faf_builder *b, faf_string str) {
   size_t n = faf_string_len(str);
   if (!builder_room(b, n))
     return false;
@@ -49,7 +49,7 @@ bool faf_builder_append(faf_builder *b, faf_string str) {
   return true;
 }
 
-bool faf_builder_append_char(faf_builder *b, char c) {
+bool faf_builder_append_char_grow(faf_builder *b, char c) {
   if (!builder_room(b, 1))
     return false;
   *builder_end(b) = c;

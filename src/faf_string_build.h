@@ -32,13 +32,37 @@ typedef struct {
 } faf_builder;
 
 faf_builder faf_builder_init(faf_region r);
-bool faf_builder_append(faf_builder *b, faf_string str);
-bool faf_builder_append_char(faf_builder *b, char c);
 bool faf_builder_append_i64(faf_builder *b, int64_t v);
 bool faf_builder_append_u64(faf_builder *b, uint64_t v);
 // NUL terminates and returns the result; unused space is given back when
 // possible. The builder must not be used afterwards.
 faf_string faf_builder_finish(faf_builder *b);
+
+// Appending is inline while it fits in the space already reserved; only
+// growing calls into the library (the _grow functions, not for direct use).
+bool faf_builder_append_grow(faf_builder *b, faf_string str);
+bool faf_builder_append_char_grow(faf_builder *b, char c);
+
+// Room for `add` more bytes and the NUL without growing?
+static inline bool faf_builder_fits(const faf_builder *b, size_t add) {
+  return !b->failed && b->len + add < b->sp.slots * FAF_SLOT_BYTES;
+}
+
+static inline bool faf_builder_append(faf_builder *b, faf_string str) {
+  size_t n = faf_string_len(str);
+  if (!faf_builder_fits(b, n))
+    return faf_builder_append_grow(b, str);
+  faf_memcpy((char *)b->sp.ptr + b->len, str.start, n);
+  b->len += n;
+  return true;
+}
+
+static inline bool faf_builder_append_char(faf_builder *b, char c) {
+  if (!faf_builder_fits(b, 1))
+    return faf_builder_append_char_grow(b, c);
+  ((char *)b->sp.ptr)[b->len++] = c;
+  return true;
+}
 
 // ---- One-shot builders ----
 
