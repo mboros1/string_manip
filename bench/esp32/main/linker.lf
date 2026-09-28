@@ -1,0 +1,26 @@
+# The library and the benchmarks run from IRAM rather than from flash through
+# the cache: flash cache misses cost tens of cycles each, and which code
+# misses shifts with unrelated changes to code layout, which made runs
+# incomparable (churn moved 80% between builds of the same library code).
+[mapping:faf]
+archive: libmain.a
+entries:
+    faf_string (noflash)
+    faf_string_build (noflash)
+    faf_string_case (noflash)
+    faf_string_cmp (noflash)
+    faf_string_concat (noflash)
+    faf_string_hash (noflash)
+    faf_string_mem (noflash)
+    faf_string_parse (noflash)
+    faf_string_search (noflash)
+    faf_string_sort (noflash)
+    faf_string_strlen (noflash)
+    faf_string_strsplit (noflash)
+    faf_string_view (noflash)
+    faf_kernels_ref (noflash)
+    faf_kernels_simd (noflash)
+    faf_kernels_swar (noflash)
+    bench_faf_string (noflash)
+    bench_common (noflash)
+    bench_alloc (noflash)
