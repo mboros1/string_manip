@@ -1,17 +1,23 @@
 // Benchmarks for the region allocator and the string operations built on it.
 // Build with `make bench` (compiled at -O2, independent of CFLAGS).
 //
-// Each benchmark reports the best of RUNS runs, in ns per operation.
+// Each benchmark reports the best of RUNS runs, in ns per operation or GB/s.
+// Results are printed in groups of alternatives; the fastest in each group is
+// highlighted and the rest show how much slower they are. Colors are used on
+// a terminal unless NO_COLOR is set.
 
 #include "faf.h"
 #include "faf_kernels.h"
 
 #include <ctype.h>
+#include <stdarg.h>
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <unistd.h>
 
 #define RUNS 5
 #define NLINES 20000
@@ -26,6 +32,104 @@ static double now_ns(void) {
   return ts.tv_sec * 1e9 + ts.tv_nsec;
 }
 
+/* ---- Output ---- */
+
+static bool use_color;
+
+#define SGR(code) (use_color ? "\033[" code "m" : "")
+#define RESET SGR("0")
+#define BOLD SGR("1")
+#define DIM SGR("2")
+#define RED SGR("31")
+#define GREEN SGR("32")
+#define YELLOW SGR("33")
+#define CYAN SGR("36")
+
+typedef enum { NS_PER_OP, GB_PER_S } bench_unit;
+
+// Results of one group of alternatives, printed together by group_end.
+#define GROUP_MAX 8
+static struct {
+  const char *name; // NULL: rows sit directly under the section title
+  bench_unit unit;
+  int n;
+  const char *labels[GROUP_MAX];
+  double values[GROUP_MAX];
+} group;
+
+static void group_end(void) {
+  if (group.n == 0)
+    return;
+  const char *indent = group.name ? "    " : "  ";
+  if (group.name)
+    printf("\n  %s%s%s\n", BOLD, group.name, RESET);
+
+  int best = 0;
+  for (int i = 1; i < group.n; ++i) {
+    bool better = group.unit == NS_PER_OP ? group.values[i] < group.values[best]
+                                          : group.values[i] > group.values[best];
+    if (better)
+      best = i;
+  }
+
+  for (int i = 0; i < group.n; ++i) {
+    double v = group.values[i];
+    printf("%s%-*s ", indent, 42 - (int)strlen(indent), group.labels[i]);
+    printf("%s", i == best && group.n > 1 ? GREEN : "");
+    if (group.unit == NS_PER_OP)
+      printf("%9.1f ns/op", v);
+    else
+      printf("%9.2f GB/s", v);
+    printf("%s", RESET);
+
+    if (group.n > 1) {
+      // how many times longer this takes than the fastest
+      double ratio = group.unit == NS_PER_OP ? v / group.values[best]
+                                             : group.values[best] / v;
+      if (i == best)
+        printf("   %sfastest%s", GREEN, RESET);
+      else if (ratio < 1.02) // within noise
+        printf("   %s~same%s", DIM, RESET);
+      else
+        printf("   %s%5.2fx slower%s",
+               ratio < 1.10 ? DIM : ratio < 2.0 ? YELLOW : RED, ratio, RESET);
+    }
+    printf("\n");
+  }
+  group.n = 0;
+}
+
+// Start a new group of alternatives; `name` may be NULL.
+static void group_begin(const char *name, bench_unit unit) {
+  group_end();
+  group.name = name;
+  group.unit = unit;
+}
+
+static void group_add(const char *label, double value) {
+  if (group.n < GROUP_MAX) {
+    group.labels[group.n] = label;
+    group.values[group.n++] = value;
+  }
+}
+
+// Section title, with an optional dimmed printf-style description.
+static void section(const char *title, const char *fmt, ...) {
+  group_end();
+  printf("\n%s%s== %s ", BOLD, CYAN, title);
+  for (size_t i = strlen(title); i < 60; ++i)
+    printf("=");
+  printf("%s\n", RESET);
+  if (fmt) {
+    va_list ap;
+    va_start(ap, fmt);
+    printf("%s", DIM);
+    vprintf(fmt, ap);
+    printf("%s\n", RESET);
+    va_end(ap);
+  }
+}
+
 #define BENCH(label, ops, ...)                                                  \
   do {                                                                         \
     double best = 1e30;                                                        \
@@ -36,7 +140,7 @@ static double now_ns(void) {
       if (t_ < best)                                                           \
         best = t_;                                                             \
     }                                                                          \
-    printf("  %-44s %9.1f ns/op\n", label, best / (ops));                      \
+    group_add(label, best / (ops));                                            \
   } while (0)
 
 /* ---- Test data ---- */
@@ -235,7 +339,7 @@ static char big[BIG + 64];
       if (t_ < best)                                                           \
         best = t_;                                                             \
     }                                                                          \
-    printf("  %-44s %9.2f GB/s\n", label, BIG / best);                         \
+    group_add(label, BIG / best);                                              \
   } while (0)
 
 static size_t libc_count(const char *s, size_t n, char c) {
@@ -264,43 +368,52 @@ static void kernel_benches(void) {
   for (int i = 0; i < NLINES; ++i)
     line_copies[i] = strdup(lines[i]);
 
-  printf("Kernels on short lines (~%zu bytes)\n", line_lens[0]);
-  LINES_BENCH("find_byte ','          simd", faf_k_find_byte(s, n, '#'));
-  LINES_BENCH("find_byte ','          ref", faf_ref_find_byte(s, n, '#'));
-  LINES_BENCH("memchr                 libc", memchr_idx(s, n, '#'));
-  LINES_BENCH("strlen                 simd", faf_k_strlen(s + (i & 7)));
-  LINES_BENCH("strlen                 ref", faf_ref_strlen(s + (i & 7)));
-  LINES_BENCH("strlen                 libc", strlen(s + (i & 7)));
-  LINES_BENCH("mismatch (equal)       simd", faf_k_mismatch(s, line_copies[i], n));
-  LINES_BENCH("mismatch (equal)       ref", faf_ref_mismatch(s, line_copies[i], n));
-  LINES_BENCH("memcmp (equal)         libc", memcmp(s, line_copies[i], n) != 0);
+  section("Kernels on short lines", "~%zu bytes per line, ns per line",
+          line_lens[0]);
+  group_begin("find_byte (absent)", NS_PER_OP);
+  LINES_BENCH("simd", faf_k_find_byte(s, n, '#'));
+  LINES_BENCH("ref", faf_ref_find_byte(s, n, '#'));
+  LINES_BENCH("libc memchr", memchr_idx(s, n, '#'));
+  group_begin("strlen", NS_PER_OP);
+  LINES_BENCH("simd", faf_k_strlen(s + (i & 7)));
+  LINES_BENCH("ref", faf_ref_strlen(s + (i & 7)));
+  LINES_BENCH("libc strlen", strlen(s + (i & 7)));
+  group_begin("mismatch (equal)", NS_PER_OP);
+  LINES_BENCH("simd", faf_k_mismatch(s, line_copies[i], n));
+  LINES_BENCH("ref", faf_ref_mismatch(s, line_copies[i], n));
+  LINES_BENCH("libc memcmp", memcmp(s, line_copies[i], n) != 0);
 
-  printf("Kernel throughput (64 KB buffer)\n");
-  BIG_BENCH("find_byte (absent)     simd", faf_k_find_byte(big, BIG, '#'));
-  BIG_BENCH("find_byte (absent)     ref", faf_ref_find_byte(big, BIG, '#'));
-  BIG_BENCH("memchr (absent)        libc", memchr_idx(big, BIG, '#'));
-  BIG_BENCH("count_byte             simd", faf_k_count_byte(big, BIG, ','));
-  BIG_BENCH("count_byte             ref", faf_ref_count_byte(big, BIG, ','));
-  BIG_BENCH("count via memchr       libc", libc_count(big, BIG, ','));
-  BIG_BENCH("strlen                 simd", faf_k_strlen(big));
-  BIG_BENCH("strlen                 libc", strlen(big));
-  BIG_BENCH("mismatch (equal)       simd", faf_k_mismatch(big, other, BIG));
-  BIG_BENCH("mismatch (equal)       ref", faf_ref_mismatch(big, other, BIG));
-  BIG_BENCH("memcmp (equal)         libc", memcmp(big, other, BIG));
-  BIG_BENCH("find_set whitespace    simd", faf_k_find_set(big, BIG, &ws, true));
-  BIG_BENCH("find_set whitespace    ref", faf_ref_find_set(big, BIG, &ws, true));
-  BIG_BENCH("strcspn whitespace     libc", strcspn(big, " \t\n\r"));
-  BIG_BENCH("ascii_case lower       simd",
-            (faf_k_ascii_case(lower_buf, big, BIG, false), lower_buf[7]));
-  BIG_BENCH("ascii_case lower       ref",
-            (faf_ref_ascii_case(lower_buf, big, BIG, false), lower_buf[7]));
-  BIG_BENCH("utf8_valid (ascii)     simd",
-            faf_string_utf8_valid(faf_string_init_n(big, BIG)));
-  BIG_BENCH("hash                   scalar",
-            faf_string_hash(faf_string_init_n(big, BIG)));
-  BIG_BENCH("faf_memcpy             simd",
-            (faf_memcpy(lower_buf, big, BIG), lower_buf[9]));
-  BIG_BENCH("memcpy                 libc", (memcpy(lower_buf, big, BIG), lower_buf[9]));
+  section("Kernel throughput", "64 KB buffer, higher is better");
+  group_begin("find_byte (absent)", GB_PER_S);
+  BIG_BENCH("simd", faf_k_find_byte(big, BIG, '#'));
+  BIG_BENCH("ref", faf_ref_find_byte(big, BIG, '#'));
+  BIG_BENCH("libc memchr", memchr_idx(big, BIG, '#'));
+  group_begin("count_byte", GB_PER_S);
+  BIG_BENCH("simd", faf_k_count_byte(big, BIG, ','));
+  BIG_BENCH("ref", faf_ref_count_byte(big, BIG, ','));
+  BIG_BENCH("libc memchr loop", libc_count(big, BIG, ','));
+  group_begin("strlen", GB_PER_S);
+  BIG_BENCH("simd", faf_k_strlen(big));
+  BIG_BENCH("libc strlen", strlen(big));
+  group_begin("mismatch (equal)", GB_PER_S);
+  BIG_BENCH("simd", faf_k_mismatch(big, other, BIG));
+  BIG_BENCH("ref", faf_ref_mismatch(big, other, BIG));
+  BIG_BENCH("libc memcmp", memcmp(big, other, BIG));
+  group_begin("find_set whitespace", GB_PER_S);
+  BIG_BENCH("simd", faf_k_find_set(big, BIG, &ws, true));
+  BIG_BENCH("ref", faf_ref_find_set(big, BIG, &ws, true));
+  BIG_BENCH("libc strcspn", strcspn(big, " \t\n\r"));
+  group_begin("ascii_case lower", GB_PER_S);
+  BIG_BENCH("simd", (faf_k_ascii_case(lower_buf, big, BIG, false), lower_buf[7]));
+  BIG_BENCH("ref", (faf_ref_ascii_case(lower_buf, big, BIG, false), lower_buf[7]));
+  group_begin("memcpy", GB_PER_S);
+  BIG_BENCH("faf_memcpy", (faf_memcpy(lower_buf, big, BIG), lower_buf[9]));
+  BIG_BENCH("libc memcpy", (memcpy(lower_buf, big, BIG), lower_buf[9]));
+  group_begin("utf8_valid (ascii)", GB_PER_S);
+  BIG_BENCH("simd", faf_string_utf8_valid(faf_string_init_n(big, BIG)));
+  group_begin("hash", GB_PER_S);
+  BIG_BENCH("scalar", faf_string_hash(faf_string_init_n(big, BIG)));
+  group_end();
   free((void *)other);
 }
 
@@ -335,25 +448,33 @@ static void scratch_malloc(void) {
 }
 
 int main(void) {
+  const char *no_color = getenv("NO_COLOR");
+  use_color = isatty(STDOUT_FILENO) && !(no_color && *no_color);
   make_lines();
-  printf("backend: %s\n", FAF_BACKEND_NAME);
+  printf("\n%sfaf_string benchmarks%s\n", BOLD, RESET);
+  printf("%sbackend %s, best of %d runs, fastest in each group in green%s\n",
+         DIM, FAF_BACKEND_NAME, RUNS, RESET);
 
-  printf("Record processing (split_owned + to_lower + concat, per line)\n");
+  section("Record processing", "split_owned + to_lower + concat, per line");
+  group_begin(NULL, NS_PER_OP);
   BENCH("region: acquire ... release", NLINES, record_region());
   BENCH("malloc: strdup/strsep/malloc ... free", NLINES, record_malloc());
 
-  printf("Small copies (20 bytes, batches of %d freed together)\n",
-         SMALL_BATCH);
+  section("Small copies", "20 bytes, batches of %d freed together",
+          SMALL_BATCH);
+  group_begin(NULL, NS_PER_OP);
   BENCH("region: faf_string_copy + release", SMALL_OPS, small_region());
   BENCH("malloc: malloc + memcpy + free", SMALL_OPS, small_malloc());
 
-  printf("Splitting a line into its 8 fields\n");
+  section("Splitting a line", "into its 8 fields");
+  group_begin(NULL, NS_PER_OP);
   BENCH("split (array of views)", NLINES, split_views());
   BENCH("next_token iterator (no allocation)", NLINES, split_iterator());
   BENCH("same iterator on libc memchr", NLINES, split_iterator_memchr());
   BENCH("split_owned (copy + NUL terminated)", NLINES, split_owned());
 
-  printf("Per-line scratch buffer (1-11 KB, generate_random_strings)\n");
+  section("Per-line scratch buffer", "1-11 KB, as in generate_random_strings");
+  group_begin(NULL, NS_PER_OP);
   BENCH("region: acquire + reserve + release", NLINES, scratch_region());
   BENCH("malloc + free", NLINES, scratch_malloc());
 

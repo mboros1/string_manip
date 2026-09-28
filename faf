@@ -1,0 +1,349 @@
+#!/usr/bin/env python3
+
+# Friendly front end for the Makefile.
+#
+# Run with no arguments in a terminal for numbered menus, or pass a command
+# for scripted use (./faf --help). Every run prints the exact make command
+# it executes, and interactive defaults come from the last run, stored in
+# .cache/faf.json.
+
+import argparse
+import json
+import os
+import platform
+import shlex
+import subprocess
+import sys
+
+ROOT = os.path.dirname(os.path.abspath(__file__))
+STATE_FILE = os.path.join(ROOT, ".cache", "faf.json")
+
+ACTIONS = [
+    ("test", "build and run tests"),
+    ("build", "build the library, tests and utilities"),
+    ("bench", "build at -O2 and run the benchmarks"),
+    ("check", "backend and freestanding checks"),
+    ("clean", "remove obj/ and bin/"),
+]
+BACKENDS = [
+    ("simd", "SIMD kernels"),
+    ("ref", "portable scalar reference kernels"),
+]
+ARCHES = [
+    ("native", "this machine's architecture"),
+    ("x86_64", "SSE2 backend via Rosetta"),
+]
+OPTS = [
+    ("debug", "-O0 -g"),
+    ("O2", "-O2 -g"),
+]
+CHECKS = [
+    ("all", "both checks below"),
+    ("backends", "rerun all tests on the scalar backend"),
+    ("freestanding", "library imports no libc memory/string functions"),
+]
+
+# Which options each action takes
+ACTION_OPTIONS = {
+    "test": ["tests", "backend", "arch", "opt"],
+    "build": ["backend", "arch", "opt"],
+    "bench": ["backend", "arch"],
+    "check": ["check", "arch"],
+    "clean": [],
+}
+
+DEFAULTS = {"backend": "simd", "arch": "native", "opt": "debug",
+            "check": "all", "tests": []}
+
+EXAMPLES = """\
+examples:
+  ./faf                          interactive menus (in a terminal)
+  ./faf test                     build and run all tests
+  ./faf test case cmp            run test_faf_string_case and test_faf_string_cmp
+  ./faf test --backend ref       all tests on the scalar backend
+  ./faf test --arch x86_64       all tests on SSE2 through Rosetta
+  ./faf bench --backend ref      benchmark the scalar backend
+  ./faf check freestanding
+  ./faf again                    repeat the last run
+  ./faf test -n                  print the make command without running it
+  ./faf build -- -j8             anything after -- is passed to make
+
+Options left out on the command line use the defaults, not the last run.
+Non-default setups build into their own directories (e.g. obj/x86_64-ref)
+so switching between them never reuses stale objects.
+"""
+
+
+# ---------------------------------------------------------------- tests
+
+def all_tests():
+    return sorted(f[len("test_"):-len(".c")] for f in os.listdir(ROOT)
+                  if f.startswith("test_") and f.endswith(".c"))
+
+
+def resolve_test(name):
+    """Accepts test_faf_string_case, faf_string_case or just case."""
+    tests = all_tests()
+    name = name.removeprefix("test_")
+    for candidate in (name, "faf_string_" + name, "faf_" + name):
+        if candidate in tests:
+            return candidate
+    matches = [t for t in tests if name in t]
+    if len(matches) == 1:
+        return matches[0]
+    if matches:
+        raise ValueError(f"'{name}' matches several tests: {', '.join(matches)}")
+    raise ValueError(f"no test matches '{name}' (./faf list shows them)")
+
+
+# ---------------------------------------------------------------- make
+
+def make_command(choices, make_args=()):
+    action = choices["action"]
+    cmd = ["make"]
+
+    opts = ACTION_OPTIONS[action]
+    backend = choices.get("backend", "simd") if "backend" in opts else "simd"
+    arch = choices.get("arch", "native") if "arch" in opts else "native"
+    opt = choices.get("opt", "debug") if "opt" in opts else "debug"
+
+    variant = "-".join(part for part, on in (
+        ("x86_64", arch == "x86_64"),
+        ("ref", backend == "ref"),
+        ("O2", opt == "O2"),
+    ) if on)
+    if variant:
+        cmd += [f"OBJ_DIR=obj/{variant}", f"BIN_DIR=bin/{variant}"]
+
+    extra = []
+    if backend == "ref":
+        extra.append("-DFAF_BACKEND_REF")
+    if arch == "x86_64":
+        extra += ["-arch", "x86_64"]
+    if extra:
+        cmd.append("EXTRA_FLAGS=" + " ".join(extra))
+    if opt == "O2":
+        cmd += ["CFLAGS=-O2 -g", "TEST_FLAGS=-O2 -g"]
+
+    cmd += list(make_args)
+
+    if action == "test":
+        tests = choices.get("tests") or []
+        cmd += ["test_" + t for t in tests] if tests else ["all_tests"]
+    elif action == "build":
+        cmd.append("all")
+    elif action == "bench":
+        cmd.append("bench")
+    elif action == "check":
+        check = choices.get("check", "all")
+        if check in ("all", "backends"):
+            cmd.append("check_backends")
+        if check in ("all", "freestanding"):
+            cmd.append("check_freestanding")
+    elif action == "clean":
+        cmd.append("clean")
+    return cmd
+
+
+def load_last():
+    try:
+        with open(STATE_FILE) as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return None
+
+
+def save_last(choices, make_args):
+    os.makedirs(os.path.dirname(STATE_FILE), exist_ok=True)
+    with open(STATE_FILE, "w") as f:
+        json.dump(dict(choices, make_args=list(make_args)), f, indent=2)
+
+
+def run(choices, make_args=(), dry_run=False):
+    cmd = make_command(choices, make_args)
+    print(f"→ {shlex.join(cmd)}", flush=True)
+    if dry_run:
+        return 0
+    save_last(choices, make_args)
+    return subprocess.call(cmd, cwd=ROOT)
+
+
+# ---------------------------------------------------------------- menus
+
+def ask(prompt):
+    try:
+        answer = input(prompt).strip()
+    except (EOFError, KeyboardInterrupt):
+        print()
+        sys.exit(130)
+    if answer.lower() in ("q", "quit", "exit"):
+        sys.exit(0)
+    return answer
+
+
+def choose(title, options, default):
+    """Numbered single choice; options are (value, description) pairs."""
+    print(f"\n{title}:")
+    width = max(len(value) for value, _ in options)
+    for i, (value, description) in enumerate(options, 1):
+        print(f"  {i}) {value:<{width}}  {description}")
+    values = [value for value, _ in options]
+    while True:
+        answer = ask(f"[{default}] > ")
+        if not answer:
+            return default
+        if answer.isdigit() and 1 <= int(answer) <= len(options):
+            return values[int(answer) - 1]
+        if answer in values:
+            return answer
+        print(f"  enter 1-{len(options)}, a name, Enter for [{default}], or q")
+
+
+def choose_tests(default):
+    tests = all_tests()
+    print("\nTests (numbers or names separated by spaces, 'all' for all):")
+    for i, test in enumerate(tests, 1):
+        print(f"  {i:>2}) {test}")
+    default_label = " ".join(default) if default else "all"
+    while True:
+        answer = ask(f"[{default_label}] > ")
+        if not answer:
+            return default
+        if answer.lower() in ("a", "all", "0"):
+            return []
+        picked = []
+        for word in answer.replace(",", " ").split():
+            if word.isdigit():
+                if not 1 <= int(word) <= len(tests):
+                    print(f"  no test number {word}")
+                    break
+                picked.append(tests[int(word) - 1])
+            else:
+                try:
+                    picked.append(resolve_test(word))
+                except ValueError as e:
+                    print(f"  {e}")
+                    break
+        else:
+            return list(dict.fromkeys(picked))
+
+
+def interactive():
+    last = load_last()
+    defaults = dict(DEFAULTS, **(last or {}))
+
+    print("faf build helper: pick by number, Enter takes the [default], q quits")
+
+    actions = list(ACTIONS)
+    if last:
+        last_cmd = shlex.join(make_command(last, last.get("make_args", [])))
+        actions.insert(0, ("again", f"repeat: {last_cmd}"))
+    action = choose("Action", actions, "again" if last else "test")
+    if action == "again":
+        return run(last, last.get("make_args", []))
+
+    choices = {"action": action}
+    opts = ACTION_OPTIONS[action]
+    if "tests" in opts:
+        choices["tests"] = choose_tests(defaults["tests"])
+    if "check" in opts:
+        choices["check"] = choose("Check", CHECKS, defaults["check"])
+    if "backend" in opts:
+        choices["backend"] = choose("Backend", BACKENDS, defaults["backend"])
+    if "arch" in opts:
+        # Only Apple Silicon can run the other architecture (via Rosetta)
+        if platform.system() == "Darwin" and platform.machine() == "arm64":
+            choices["arch"] = choose("Architecture", ARCHES, defaults["arch"])
+    if "opt" in opts:
+        choices["opt"] = choose("Optimization", OPTS, defaults["opt"])
+    print()
+    return run(choices)
+
+
+# ---------------------------------------------------------------- CLI
+
+def parse_args(argv):
+    # Everything after -- goes straight to make
+    make_args = []
+    if "--" in argv:
+        split = argv.index("--")
+        argv, make_args = argv[:split], argv[split + 1:]
+
+    parser = argparse.ArgumentParser(
+        prog="./faf",
+        description="Build, test and benchmark faf_string through make. "
+                    "Run without arguments in a terminal for menus.",
+        epilog=EXAMPLES,
+        formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = parser.add_subparsers(dest="action", metavar="command")
+
+    def add(name, help_text, options):
+        p = sub.add_parser(name, help=help_text, description=help_text)
+        if "backend" in options:
+            p.add_argument("--backend", choices=[v for v, _ in BACKENDS],
+                           default="simd", help="kernel backend (default: simd)")
+        if "arch" in options:
+            p.add_argument("--arch", choices=[v for v, _ in ARCHES],
+                           default="native",
+                           help="target architecture; x86_64 runs via Rosetta "
+                                "on Apple Silicon (default: native)")
+        if "opt" in options:
+            p.add_argument("--opt", choices=[v for v, _ in OPTS],
+                           default="debug",
+                           help="debug = -O0 -g, O2 = -O2 -g (default: debug)")
+        p.add_argument("-n", "--dry-run", action="store_true",
+                       help="print the make command without running it")
+        return p
+
+    for name, help_text in ACTIONS:
+        p = add(name, help_text, ACTION_OPTIONS[name])
+        if name == "test":
+            p.add_argument("tests", nargs="*", metavar="TEST",
+                           help="tests to run, e.g. case or faf_string_case "
+                                "(default: all; ./faf list shows them)")
+        elif name == "check":
+            p.add_argument("check", nargs="?", default="all",
+                           choices=[v for v, _ in CHECKS],
+                           help="which check (default: all)")
+
+    again = sub.add_parser("again", help="repeat the last run")
+    again.add_argument("-n", "--dry-run", action="store_true",
+                       help="print the make command without running it")
+    sub.add_parser("list", help="list the tests")
+
+    return parser, parser.parse_args(argv), make_args
+
+
+def main():
+    parser, args, make_args = parse_args(sys.argv[1:])
+
+    if args.action is None:
+        if sys.stdin.isatty() and sys.stdout.isatty() and not make_args:
+            return interactive()
+        parser.print_help()
+        return 2
+
+    if args.action == "list":
+        print("\n".join(all_tests()))
+        return 0
+
+    if args.action == "again":
+        last = load_last()
+        if not last:
+            sys.exit("faf: nothing to repeat yet")
+        return run(last, make_args or last.get("make_args", []), args.dry_run)
+
+    choices = {"action": args.action}
+    for key in ACTION_OPTIONS[args.action]:
+        choices[key] = getattr(args, key)
+    if "tests" in choices:
+        try:
+            tests = [resolve_test(t) for t in args.tests]
+        except ValueError as e:
+            sys.exit(f"faf: {e}")
+        choices["tests"] = list(dict.fromkeys(tests))
+    return run(choices, make_args, args.dry_run)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

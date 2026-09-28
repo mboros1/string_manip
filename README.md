@@ -40,6 +40,23 @@ For a freestanding target with no libc, build with `-DFAF_PROVIDE_LIBC_MEM`: the
 
 This project uses a Makefile build system that can be configured for your local environment.
 
+### The `./faf` helper
+
+`./faf` is a front end to the Makefile. Run it with no arguments for numbered menus (test, build, bench, check, clean; backend, architecture, optimization). The defaults come from your last run, and Enter repeats it. It prints the exact `make` command before running it.
+
+```bash
+./faf                        # interactive menus
+./faf test case cmp          # run test_faf_string_case and test_faf_string_cmp
+./faf test --backend ref     # all tests on the scalar backend
+./faf test --arch x86_64     # SSE2 through Rosetta on Apple Silicon
+./faf again                  # repeat the last run
+./faf build -n               # print the make command only
+./faf build -- -j8 CC=cc     # arguments after -- go to make
+./faf --help                 # everything else
+```
+
+Non-default setups build into their own directories (e.g. `obj/x86_64-ref`), so switching between them never reuses stale objects.
+
 ### Configuration Options
 
 You can configure the build process in several ways:
