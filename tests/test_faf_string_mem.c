@@ -47,6 +47,7 @@ static void test_acquire(void) {
 }
 
 static void test_acquire_distinct(void) {
+  TEST_REQUIRE(FAF_NPOOLS >= 2, "needs two pools (FAF_NPOOLS)");
   // two acquires without any allocation in between must not share a pool
   faf_region a = faf_region_acquire();
   faf_region b = faf_region_acquire();
@@ -87,7 +88,8 @@ static void test_reserve(void) {
   faf_span b = faf_reserve(r, 5);
   ASSERT_TRUE(a.ptr != NULL && b.ptr != NULL, "Reserve failed");
   ASSERT_TRUE(b.ptr == a.ptr + 10, "Spans are not contiguous");
-  ASSERT_TRUE(((uintptr_t)a.ptr & 15) == 0, "Span is not 16 byte aligned");
+  ASSERT_TRUE(((uintptr_t)a.ptr & (FAF_SLOT_BYTES - 1)) == 0,
+              "Span is not slot aligned");
   ASSERT_INT_EQ(15, (int)faf_region_used(r), "Used slots incorrect");
   ASSERT_INT_EQ(FAF_POOL_SLOTS - 15, (int)faf_region_remaining(r),
                 "Remaining slots incorrect");
@@ -164,24 +166,26 @@ static void test_copy_nul_terminated(void) {
   // dirty the pool first so a missing terminator can't be hidden by zeroed
   // static memory
   faf_region r = faf_region_acquire();
-  faf_span sp = faf_reserve(r, 8);
-  memset(sp.ptr, 'X', 8 * FAF_SLOT_BYTES);
+  faf_span sp = faf_reserve(r, FAF_POOL_SLOTS);
+  memset(sp.ptr, 'X', (size_t)FAF_POOL_SLOTS * FAF_SLOT_BYTES);
   uint16_t pool = r.pool;
   faf_region_release(r);
 
-  r = faf_region_acquire();
-  ASSERT_TRUE(r.pool == pool, "Expected the dirty pool back");
-
-  // lengths on and around the 16 byte boundary
+  // lengths on and around the 16 byte boundary, each copied to the start of
+  // the dirty pool
   const char *src = "0123456789abcdef0123456789ABCDEF!";
   for (size_t len = 0; len <= 33; ++len) {
+    r = faf_region_acquire();
+    ASSERT_TRUE(r.pool == pool, "Expected the dirty pool back");
     faf_string copy = faf_string_copy(r, faf_string_init_n(src, len));
-    ASSERT_INT_EQ((int)len, (int)strlen(copy.start),
-                  "Copy is not NUL terminated at its length");
-    ASSERT_TRUE(memcmp(src, copy.start, len) == 0, "Copied bytes differ");
+    ASSERT_TRUE(!faf_string_is_none(copy), "Copy failed");
+    if (!faf_string_is_none(copy)) {
+      ASSERT_INT_EQ((int)len, (int)strlen(copy.start),
+                    "Copy is not NUL terminated at its length");
+      ASSERT_TRUE(memcmp(src, copy.start, len) == 0, "Copied bytes differ");
+    }
+    faf_region_release(r);
   }
-
-  faf_region_release(r);
 }
 
 static void test_copy_from_region(void) {

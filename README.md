@@ -38,7 +38,7 @@ Functions that allocate take a `faf_region` and return `FAF_STRING_NONE` when th
 
 ### Memory configuration
 
-All memory is static: `FAF_NPOOLS` pools of `FAF_POOL_SLOTS` 16-byte slots, 12 × 1024 slots (192 KB) by default. A region is one pool, so `FAF_POOL_SLOTS` also caps the size of any single result. Both are set at build time, e.g. `-DFAF_NPOOLS=4 -DFAF_POOL_SLOTS=512` for 32 KB on a microcontroller. `FAF_POOL_ATTR` places the pool storage, e.g. `-DFAF_POOL_ATTR=EXT_RAM_BSS_ATTR` for PSRAM on an ESP32.
+All memory is static: `FAF_NPOOLS` pools of `FAF_POOL_SLOTS` slots of `FAF_SLOT_BYTES`, 12 × 1024 slots by default. A region is one pool, so `FAF_POOL_SLOTS` also caps the size of any single result. `FAF_SLOT_BYTES` is the allocation granularity and alignment: one vector register (16) with the SIMD kernels, 8 with the scalar ones, where smaller slots waste less on short strings; any power of two at least the alignment of `faf_string` works. Both are set at build time, e.g. `-DFAF_NPOOLS=4 -DFAF_POOL_SLOTS=512` for 32 KB on a microcontroller. `FAF_POOL_ATTR` places the pool storage, e.g. `-DFAF_POOL_ATTR=EXT_RAM_BSS_ATTR` for PSRAM on an ESP32.
 
 ### Backends
 

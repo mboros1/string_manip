@@ -9,6 +9,8 @@
 
 // NUL terminated and zero padded to the end of its last slot
 static int terminated(faf_string s) {
+  if (faf_string_is_none(s))
+    return 0;
   size_t len = faf_string_len(s);
   size_t end = faf_slots_for(len) * FAF_SLOT_BYTES;
   for (size_t i = len; i < end; ++i)
@@ -18,15 +20,19 @@ static int terminated(faf_string s) {
 }
 
 static void test_builder_in_place(void) {
+  char expected[2048] = {0};
+  for (int i = 0; i < 100; ++i)
+    snprintf(expected + strlen(expected), sizeof(expected) - strlen(expected),
+             "item%d,", i);
+  // growing in place doubles, so allow twice the final size
+  TEST_REQUIRE(2 * faf_slots_for(strlen(expected)) <= FAF_POOL_SLOTS,
+               "the result needs a bigger region (FAF_POOL_SLOTS)");
   faf_region r = faf_region_acquire();
   faf_builder b = faf_builder_init(r);
-  char expected[2048] = {0};
   for (int i = 0; i < 100; ++i) {
     faf_builder_append(&b, S("item"));
     faf_builder_append_i64(&b, i);
     faf_builder_append_char(&b, ',');
-    snprintf(expected + strlen(expected), sizeof(expected) - strlen(expected),
-             "item%d,", i);
   }
   const faf_slot *first = b.sp.ptr;
   faf_string s = faf_builder_finish(&b);
@@ -42,8 +48,10 @@ static void test_builder_in_place(void) {
 // Near the end of the region doubling doesn't fit, but growing in place by
 // just enough still does.
 static void test_builder_near_full(void) {
+  const size_t room = faf_slots_for(150); // exactly the final string
+  TEST_REQUIRE(room <= FAF_POOL_SLOTS, "150 bytes need a bigger region");
   faf_region r = faf_region_acquire();
-  faf_reserve(r, FAF_POOL_SLOTS - 10); // leave 10 slots
+  faf_reserve(r, FAF_POOL_SLOTS - room);
   faf_builder b = faf_builder_init(r);
   char expected[160] = {0};
   for (int i = 0; i < 9; ++i) { // 9 x 16 bytes, then 6: 150 bytes + NUL
@@ -93,10 +101,13 @@ static void test_builder_numbers(void) {
 
 static void test_builder_out_of_space(void) {
   faf_region r = faf_region_acquire();
-  faf_reserve(r, FAF_POOL_SLOTS - 2);
+  faf_reserve(r, FAF_POOL_SLOTS - faf_slots_for(4)); // room for "fits" only
   faf_builder b = faf_builder_init(r);
   ASSERT_TRUE(faf_builder_append(&b, S("fits")), "small append failed");
-  ASSERT_FALSE(faf_builder_append(&b, S("this is far too long to fit in two slots")),
+  char too_long[2 * FAF_SLOT_BYTES + 1];
+  memset(too_long, 'x', sizeof(too_long) - 1);
+  too_long[sizeof(too_long) - 1] = '\0';
+  ASSERT_FALSE(faf_builder_append(&b, faf_string_init(too_long)),
                "oversized append succeeded");
   ASSERT_FALSE(faf_builder_append(&b, S("x")), "builder should stay failed");
   ASSERT_TRUE(faf_string_is_none(faf_builder_finish(&b)), "failed builder finished");

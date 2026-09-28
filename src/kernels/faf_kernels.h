@@ -24,18 +24,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#if defined(FAF_BACKEND_REF)
-#define FAF_BACKEND_NAME "ref"
-#elif defined(__SSE2__) || defined(_M_X64)
-#define FAF_BACKEND_SSE2 1
-#define FAF_BACKEND_NAME "sse2"
-#elif defined(__ARM_NEON) || defined(__aarch64__)
-#define FAF_BACKEND_NEON 1
-#define FAF_BACKEND_NAME "neon"
-#else
-#define FAF_BACKEND_REF 1
-#define FAF_BACKEND_NAME "ref"
-#endif
+#include "../faf_backend.h"
 
 // Keep the compiler from recognizing loops as strlen/memchr/... and replacing
 // them with libc calls: the library may only depend on memcpy, memset, memmove

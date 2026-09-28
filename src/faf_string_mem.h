@@ -1,6 +1,7 @@
 #ifndef FAF_STRING_MEM_H
 #define FAF_STRING_MEM_H
 
+#include "faf_backend.h"
 #include "faf_string.h"
 
 #include <stdbool.h>
@@ -16,7 +17,7 @@
 
 // Build-time sizing: FAF_NPOOLS pools of FAF_POOL_SLOTS slots, so
 // FAF_NPOOLS * FAF_POOL_SLOTS * FAF_SLOT_BYTES bytes of static storage
-// (192 KB by default). A region can never hold more than one pool, so
+// (192 KB by default with SIMD kernels, 96 KB with the scalar ones). A region can never hold more than one pool, so
 // FAF_POOL_SLOTS also caps the size of a single string. Small targets lower
 // these, e.g. -DFAF_NPOOLS=4 -DFAF_POOL_SLOTS=512 for 32 KB.
 #ifndef FAF_NPOOLS
@@ -25,8 +26,17 @@
 #ifndef FAF_POOL_SLOTS
 #define FAF_POOL_SLOTS 1024
 #endif
-// bytes per slot, one SIMD register
-#define FAF_SLOT_BYTES 16
+// Bytes per slot: the allocation granularity and alignment of region
+// memory. Results are zero padded to the end of their last slot. Defaults to
+// one vector register on SIMD backends (so strings start vector aligned), and
+// to 8 on the scalar backend, which wastes less on small targets.
+#ifndef FAF_SLOT_BYTES
+#if FAF_VECTOR_BYTES
+#define FAF_SLOT_BYTES FAF_VECTOR_BYTES
+#else
+#define FAF_SLOT_BYTES 8
+#endif
+#endif
 
 // Placement of the pool storage, e.g. EXT_RAM_BSS_ATTR to put it in PSRAM on
 // an ESP32, or a section attribute for a linker script. Empty by default.
@@ -37,9 +47,15 @@
 _Static_assert(FAF_NPOOLS >= 1 && FAF_NPOOLS < UINT16_MAX,
                "FAF_NPOOLS must be in [1, 65534]: pools are indexed by uint16_t");
 _Static_assert(FAF_POOL_SLOTS >= 1, "FAF_POOL_SLOTS must be at least 1");
+// token arrays (faf_string_split) live in slots, so a slot must be aligned
+// for faf_string
+_Static_assert((FAF_SLOT_BYTES & (FAF_SLOT_BYTES - 1)) == 0 &&
+                   FAF_SLOT_BYTES >= _Alignof(faf_string),
+               "FAF_SLOT_BYTES must be a power of two, at least the alignment "
+               "of faf_string");
 
 typedef struct {
-  _Alignas(16) unsigned char bytes[FAF_SLOT_BYTES];
+  _Alignas(FAF_SLOT_BYTES) unsigned char bytes[FAF_SLOT_BYTES];
 } faf_slot;
 
 // Handle to an acquired pool. `gen` is the pool's generation at acquire time,

@@ -52,7 +52,7 @@ static void test_lengths(void) {
 
 static void test_out_of_space(void) {
   faf_region r = faf_region_acquire();
-  faf_reserve(r, FAF_POOL_SLOTS - 1);
+  faf_reserve(r, FAF_POOL_SLOTS - (faf_slots_for(20) - 1)); // a slot short
   faf_string a = faf_string_init("0123456789");
   ASSERT_TRUE(faf_string_is_none(faf_string_concat(r, a, a)),
               "Concat into a full region succeeded");
