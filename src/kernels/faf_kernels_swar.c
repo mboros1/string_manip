@@ -1,4 +1,5 @@
 #include "faf_kernels.h"
+#include "faf_kernels_swar.h"
 
 // SWAR kernels ("SIMD within a register"): a machine word used as 4 or 8 byte
 // lanes, for CPUs without SSE2/NEON. The byte tests below never carry from
@@ -16,6 +17,14 @@
 // a counted loop lets GCC use hardware loops (Xtensa LOOP).
 
 #if defined(FAF_BACKEND_SWAR)
+
+// With the pie backend (ESP32-S3), these five are faf_swar_* instead: the
+// PIE kernels use them for the unaligned ends and for short inputs.
+#if defined(FAF_BACKEND_PIE)
+#define SWAR_KERNEL(name) faf_swar_##name
+#else
+#define SWAR_KERNEL(name) faf_k_##name
+#endif
 
 typedef uintptr_t word;
 // may_alias: words are read out of char data
@@ -92,7 +101,7 @@ static inline size_t count_lanes(word m) {
 /* ---- Scanning ---- */
 
 FAF_NO_ASAN FAF_NO_BUILTIN
-size_t faf_k_strlen(const char *s) {
+size_t SWAR_KERNEL(strlen)(const char *s) {
   const char *p = s;
   for (; !pair_aligned(p); ++p) {
     if (*p == '\0')
@@ -106,7 +115,7 @@ size_t faf_k_strlen(const char *s) {
 }
 
 FAF_NO_BUILTIN
-size_t faf_k_find_byte(const char *s, size_t n, char c) {
+size_t SWAR_KERNEL(find_byte)(const char *s, size_t n, char c) {
   size_t i = 0;
   for (; i < n && !aligned(s + i); ++i) {
     if (s[i] == c)
@@ -160,7 +169,7 @@ size_t faf_k_rfind_byte(const char *s, size_t n, char c) {
 }
 
 FAF_NO_BUILTIN
-size_t faf_k_count_byte(const char *s, size_t n, char c) {
+size_t SWAR_KERNEL(count_byte)(const char *s, size_t n, char c) {
   size_t i = 0, count = 0;
   for (; i < n && !aligned(s + i); ++i)
     count += s[i] == c;
@@ -354,7 +363,7 @@ mismatch(const char *a, const char *b, size_t n, bool icase) {
 }
 
 FAF_NO_BUILTIN
-size_t faf_k_mismatch(const char *a, const char *b, size_t n) {
+size_t SWAR_KERNEL(mismatch)(const char *a, const char *b, size_t n) {
   return mismatch(a, b, n, false);
 }
 
@@ -390,7 +399,7 @@ void faf_k_ascii_case(char *dst, const char *src, size_t n, bool upper) {
 }
 
 FAF_NO_BUILTIN
-size_t faf_k_ascii_prefix(const char *s, size_t n) {
+size_t SWAR_KERNEL(ascii_prefix)(const char *s, size_t n) {
   size_t i = 0;
   for (; i < n && !aligned(s + i); ++i) {
     if ((unsigned char)s[i] >= 0x80)

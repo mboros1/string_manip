@@ -7,11 +7,13 @@
 //
 //   sse2  x86 / x86-64
 //   neon  AArch64 / ARMv7 with NEON
+//   pie   ESP32-S3: swar plus 128-bit PIE vector kernels for scanning
 //   swar  any other 32- or 64-bit little-endian CPU: a machine word used as
 //         4 or 8 byte lanes ("SIMD within a register")
 //   ref   byte at a time: 8- and 16-bit CPUs, big-endian ones, or forced
 //
-// Force one with -DFAF_BACKEND_REF or -DFAF_BACKEND_SWAR.
+// Force one with -DFAF_BACKEND_REF or -DFAF_BACKEND_SWAR (on the S3: plain
+// SWAR, without PIE).
 
 #include <stdint.h>
 
@@ -25,6 +27,14 @@
 #elif defined(__ARM_NEON) || defined(__aarch64__)
 #define FAF_BACKEND_NEON 1
 #define FAF_BACKEND_NAME "neon"
+#elif defined(FAF_BACKEND_PIE) ||                                             \
+    (defined(__XTENSA__) && defined(__XCHAL_MAX_INSTRUCTION_SIZE) &&           \
+     __XCHAL_MAX_INSTRUCTION_SIZE >= 4)
+// ESP32-S3: SWAR plus PIE vector kernels. Detected by its 4-byte
+// instructions: PIE's are the only ones among ESP chips (not the S2's LX7).
+#define FAF_BACKEND_SWAR 1
+#define FAF_BACKEND_PIE 1
+#define FAF_BACKEND_NAME "pie"
 #elif defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__ &&  \
     UINTPTR_MAX >= 0xFFFFFFFFu
 #define FAF_BACKEND_SWAR 1

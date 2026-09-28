@@ -7,6 +7,15 @@
 #include "bench.h"
 #include "faf.h"
 #include "kernels/faf_kernels.h"
+#include "kernels/faf_kernels_swar.h"
+
+// With the pie backend (ESP32-S3), the SWAR versions of the kernels it
+// replaces get their own rows, so PIE, SWAR and ref compare in one run
+#if defined(FAF_BACKEND_PIE)
+#define PIE_SWAR(bench, expr) bench("swar", expr)
+#else
+#define PIE_SWAR(bench, expr)
+#endif
 
 #include <ctype.h>
 #include <stdint.h>
@@ -259,6 +268,7 @@ void bench_kernels(void) {
           line_lens[0]);
   group_begin("find_byte (absent)", NS_PER_OP);
   LINES_BENCH(FAF_BACKEND_NAME, faf_k_find_byte(s, n, '#'));
+  PIE_SWAR(LINES_BENCH, faf_swar_find_byte(s, n, '#'));
   LINES_BENCH("ref", faf_ref_find_byte(s, n, '#'));
   LINES_BENCH("libc memchr", memchr_idx(s, n, '#'));
   group_begin("find_bytes ',' (all ~7 per line)", NS_PER_OP);
@@ -266,27 +276,33 @@ void bench_kernels(void) {
   LINES_BENCH("ref", faf_ref_find_bytes(s, n, ',', positions, 16));
   group_begin("strlen", NS_PER_OP);
   LINES_BENCH(FAF_BACKEND_NAME, faf_k_strlen(s + (i & 7)));
+  PIE_SWAR(LINES_BENCH, faf_swar_strlen(s + (i & 7)));
   LINES_BENCH("ref", faf_ref_strlen(s + (i & 7)));
   LINES_BENCH("libc strlen", strlen(s + (i & 7)));
   group_begin("mismatch (equal)", NS_PER_OP);
   LINES_BENCH(FAF_BACKEND_NAME, faf_k_mismatch(s, line_copies[i], n));
+  PIE_SWAR(LINES_BENCH, faf_swar_mismatch(s, line_copies[i], n));
   LINES_BENCH("ref", faf_ref_mismatch(s, line_copies[i], n));
   LINES_BENCH("libc memcmp", memcmp(s, line_copies[i], n) != 0);
 
   section("Kernel throughput", "64 KB buffer, higher is better");
   group_begin("find_byte (absent)", GB_PER_S);
   BIG_BENCH(FAF_BACKEND_NAME, faf_k_find_byte(big, BIG, '#'));
+  PIE_SWAR(BIG_BENCH, faf_swar_find_byte(big, BIG, '#'));
   BIG_BENCH("ref", faf_ref_find_byte(big, BIG, '#'));
   BIG_BENCH("libc memchr", memchr_idx(big, BIG, '#'));
   group_begin("count_byte", GB_PER_S);
   BIG_BENCH(FAF_BACKEND_NAME, faf_k_count_byte(big, BIG, ','));
+  PIE_SWAR(BIG_BENCH, faf_swar_count_byte(big, BIG, ','));
   BIG_BENCH("ref", faf_ref_count_byte(big, BIG, ','));
   BIG_BENCH("libc memchr loop", libc_count(big, BIG, ','));
   group_begin("strlen", GB_PER_S);
   BIG_BENCH(FAF_BACKEND_NAME, faf_k_strlen(big));
+  PIE_SWAR(BIG_BENCH, faf_swar_strlen(big));
   BIG_BENCH("libc strlen", strlen(big));
   group_begin("mismatch (equal)", GB_PER_S);
   BIG_BENCH(FAF_BACKEND_NAME, faf_k_mismatch(big, other, BIG));
+  PIE_SWAR(BIG_BENCH, faf_swar_mismatch(big, other, BIG));
   BIG_BENCH("ref", faf_ref_mismatch(big, other, BIG));
   BIG_BENCH("libc memcmp", memcmp(big, other, BIG));
   group_begin("find_set whitespace", GB_PER_S);

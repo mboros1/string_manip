@@ -270,10 +270,66 @@ static void test_transforms(void) {
 }
 
 // Test case definitions
+// Long inputs, which the short tests above don't reach: the PIE kernels
+// (ESP32-S3) scan 32-byte chunks of inputs of 64 bytes and more, and
+// count_byte folds its lane counters every 63 chunks (2016 bytes). Every
+// backend runs this against the reference.
+#define LONG_LEN 2300
+static char long_a[LONG_LEN + 64], long_b[LONG_LEN + 64];
+
+static void test_long(void) {
+  failures = 0;
+  static const size_t lens[] = {63,   64,   65,   95,   96,   97,
+                                127,  128,  200,  511,  1000, 2015,
+                                2016, 2017, 2047, 2048, 2100, LONG_LEN};
+  for (size_t li = 0; li < sizeof(lens) / sizeof(lens[0]); ++li) {
+    size_t len = lens[li];
+    for (size_t off = 0; off < 32; ++off) {
+      char *s = long_a + off;
+
+      // dense: random bytes, matches everywhere ('q' is never in them)
+      fill_random(s, len);
+      CHECK_EQ(faf_ref_count_byte(s, len, ','), faf_k_count_byte(s, len, ','),
+               "long count dense", off, len);
+      CHECK_EQ(faf_ref_find_byte(s, len, ','), faf_k_find_byte(s, len, ','),
+               "long find dense", off, len);
+      CHECK_EQ(len, faf_k_find_byte(s, len, 'q'), "long find absent", off, len);
+      CHECK_EQ(0, faf_k_count_byte(s, len, 'q'), "long count absent", off, len);
+
+      // sparse: one target, anywhere
+      size_t at = rng() % len;
+      memset(s, 'x', len);
+      s[at] = ',';
+      CHECK_EQ(at, faf_k_find_byte(s, len, ','), "long find one", off, len);
+      CHECK_EQ(1, faf_k_count_byte(s, len, ','), "long count one", off, len);
+      s[at] = (char)0x80;
+      CHECK_EQ(at, faf_k_ascii_prefix(s, len), "long ascii_prefix", off, len);
+      CHECK_EQ(at, faf_k_ascii_prefix(s, at), "long ascii_prefix all", off, at);
+
+      // strlen: the NUL at the end
+      memset(s, 'y', len);
+      s[len] = '\0';
+      CHECK_EQ(len, faf_k_strlen(s), "long strlen", off, len);
+
+      // mismatch against a copy at every relative alignment
+      fill_random(s, len);
+      for (size_t boff = 0; boff < 16; ++boff) {
+        char *t = long_b + boff;
+        memcpy(t, s, len);
+        CHECK_EQ(len, faf_k_mismatch(s, t, len), "long mismatch equal", boff, len);
+        t[at] ^= 1;
+        CHECK_EQ(at, faf_k_mismatch(s, t, len), "long mismatch", boff, len);
+      }
+    }
+  }
+  ASSERT_INT_EQ(0, failures, "long inputs differ from reference");
+}
+
 static test_case_t kernel_tests[] = {
     {"find_count", test_find_count}, {"sets", test_sets},
     {"byteset", test_byteset},       {"mismatch", test_mismatch},
     {"strlen", test_strlen},         {"transforms", test_transforms},
+    {"long", test_long},
 };
 
 // Setup and teardown functions
