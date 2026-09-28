@@ -151,6 +151,17 @@ static void split_iterator(void) {
   sink = acc;
 }
 
+static void split_tokens(void) {
+  size_t acc = 0;
+  for (int i = 0; i < NLINES; ++i) {
+    faf_tokens t = faf_tokens_init(faf_string_init_n(lines[i], line_lens[i]), ',');
+    faf_string field;
+    while (faf_tokens_next(&t, &field))
+      acc += faf_string_len(field);
+  }
+  sink = acc;
+}
+
 // the same iterator on libc memchr, as a baseline
 static void split_iterator_memchr(void) {
   size_t acc = 0;
@@ -335,6 +346,7 @@ void bench_strings(void) {
   group_begin(NULL, NS_PER_OP);
   BENCH("split (array of views)", NLINES, split_views());
   BENCH("next_token iterator (no allocation)", NLINES, split_iterator());
+  BENCH("faf_tokens iterator (batched)", NLINES, split_tokens());
   BENCH("same iterator on libc memchr", NLINES, split_iterator_memchr());
   BENCH("split_owned (copy + NUL terminated)", NLINES, split_owned());
 

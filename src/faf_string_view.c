@@ -49,6 +49,27 @@ bool faf_string_next_token(faf_string *rest, char tok, faf_string *out) {
   return true;
 }
 
+faf_tokens faf_tokens_init(faf_string str, char tok) {
+  return (faf_tokens){.start = str.start, .end = str.end, .base = str.start,
+                      .count = 0, .next = 0, .tok = tok,
+                      .done = str.start == NULL};
+}
+
+bool faf_tokens_refill(faf_tokens *t, faf_string *out) {
+  if (t->done)
+    return false;
+  t->base = t->start;
+  t->next = 0;
+  t->count = (uint8_t)faf_k_find_bytes(t->start, (size_t)(t->end - t->start),
+                                       t->tok, t->pos, FAF_TOKENS_BATCH);
+  if (t->count > 0)
+    return faf_tokens_next(t, out);
+  // no separator left: the rest is the last token
+  *out = (faf_string){.start = t->start, .end = t->end};
+  t->done = true;
+  return true;
+}
+
 bool faf_string_split_once(faf_string str, char tok, faf_string *left,
                            faf_string *right) {
   size_t n = faf_string_len(str);

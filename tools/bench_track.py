@@ -34,6 +34,7 @@ OPERATIONS = [  # ns per op, lower is better
     ("record, malloc", "Record processing", "", "malloc: strdup/strsep/malloc ... free"),
     ("split", "Splitting a line", "", "split (array of views)"),
     ("next_token", "Splitting a line", "", "next_token iterator (no allocation)"),
+    ("faf_tokens", "Splitting a line", "", "faf_tokens iterator (batched)"),
     ("split_owned", "Splitting a line", "", "split_owned (copy + NUL terminated)"),
     ("churn 256", "Churn", "256 live strings", "region, compact when full"),
     ("append 1 B", "Growth", "1-byte appends", "faf_builder"),
