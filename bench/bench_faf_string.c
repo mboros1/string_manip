@@ -273,6 +273,7 @@ void bench_kernels(void) {
   LINES_BENCH("libc memchr", memchr_idx(s, n, '#'));
   group_begin("find_bytes ',' (all ~7 per line)", NS_PER_OP);
   LINES_BENCH(FAF_BACKEND_NAME, faf_k_find_bytes(s, n, ',', positions, 16));
+  PIE_SWAR(LINES_BENCH, faf_swar_find_bytes(s, n, ',', positions, 16));
   LINES_BENCH("ref", faf_ref_find_bytes(s, n, ',', positions, 16));
   group_begin("strlen", NS_PER_OP);
   LINES_BENCH(FAF_BACKEND_NAME, faf_k_strlen(s + (i & 7)));

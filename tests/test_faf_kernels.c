@@ -122,6 +122,25 @@ static void test_find_count(void) {
   ASSERT_INT_EQ(0, failures, "find/count kernels differ from reference");
 }
 
+// Every byte matches: each position slot, and stopping at every count
+static void test_find_bytes_dense(void) {
+  static _Alignas(16) char buf[64];
+  memset(buf, ',', sizeof buf);
+  failures = 0;
+  for (size_t off = 0; off < 8; ++off) {
+    for (size_t len = 0; len <= 40; ++len) {
+      for (size_t max = 0; max <= 20; ++max) {
+        size_t got[20];
+        size_t ng = faf_k_find_bytes(buf + off, len, ',', got, max);
+        CHECK_EQ(len < max ? len : max, ng, "find_bytes dense count", off, len);
+        for (size_t j = 0; j < ng && j < max; ++j)
+          CHECK_EQ(j, got[j], "find_bytes dense position", off, len);
+      }
+    }
+  }
+  ASSERT_INT_EQ(0, failures, "find_bytes on all matches differs");
+}
+
 static void test_sets(void) {
   setup_pages();
   failures = 0;
@@ -348,6 +367,7 @@ static test_case_t kernel_tests[] = {
     {"byteset", test_byteset},       {"mismatch", test_mismatch},
     {"strlen", test_strlen},         {"transforms", test_transforms},
     {"long", test_long},             {"after_exit", test_after_exit},
+    {"find_bytes_dense", test_find_bytes_dense},
 };
 
 // Setup and teardown functions

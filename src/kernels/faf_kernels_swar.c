@@ -198,8 +198,8 @@ size_t SWAR_KERNEL(count_byte)(const char *s, size_t n, char c) {
 }
 
 FAF_NO_BUILTIN
-size_t faf_k_find_bytes(const char *s, size_t n, char c, size_t *pos,
-                        size_t max) {
+size_t SWAR_KERNEL(find_bytes)(const char *s, size_t n, char c, size_t *pos,
+                                size_t max) {
   size_t i = 0, k = 0;
   if (max == 0)
     return 0;
