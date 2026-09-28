@@ -86,6 +86,7 @@ esp32s3 rev 2, 240 MHz, ESP-IDF v6.1
 | 2026-09-28 `a0eea12fc` pie: find_byte word loops with XOR + BNONE per byte; test fo | pie | 6,845 | 45,938 | 3,832 | 4,375 | 4,452 | 4,645 |  |  |  |
 | 2026-09-28 `7d4b0dd95` pie: find_bytes in assembly (two words per loop, BNONE per b | pie | 5,918 | 45,928 | 2,900 | 4,375 | 3,455 | 3,715 |  |  |  |
 | 2026-09-28 `e52885f38` pie: mismatch in assembly (SSA8L/SRC funnel shift for unalig | pie | 5,912 | 45,928 | 2,900 | 4,375 | 3,455 | 3,715 |  |  |  |
+| 2026-09-28 `d5eacf2bb` bench: count_byte and ascii_prefix on short lines | pie | 5,912 | 45,928 | 2,900 | 4,375 | 3,455 | 3,712 |  |  |  |
 
 **Kernels, MB/s (higher is better)**
 
@@ -102,3 +103,4 @@ esp32s3 rev 2, 240 MHz, ESP-IDF v6.1
 | 2026-09-28 `a0eea12fc` pie: find_byte word loops with XOR + BNONE per byte; test fo | pie | 724 | 584 | 716 | 234 | 21.8 | 39.9 |
 | 2026-09-28 `7d4b0dd95` pie: find_bytes in assembly (two words per loop, BNONE per b | pie | 724 | 585 | 716 | 234 | 21.8 | 38.3 |
 | 2026-09-28 `e52885f38` pie: mismatch in assembly (SSA8L/SRC funnel shift for unalig | pie | 724 | 585 | 715 | 415 | 21.8 | 39.9 |
+| 2026-09-28 `d5eacf2bb` bench: count_byte and ascii_prefix on short lines | pie | 724 | 584 | 715 | 415 | 21.8 | 39.9 |
