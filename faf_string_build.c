@@ -67,14 +67,33 @@ static char *u64_digits(char *end, uint64_t v, unsigned base) {
   return end;
 }
 
+// Number of digits of `v` in `base` (10 or 16).
+static size_t u64_digit_count(uint64_t v, unsigned base) {
+  size_t n = 1;
+  if (base == 16) {
+    while (v >>= 4)
+      ++n;
+    return n;
+  }
+  for (uint64_t p = 10; n < 20 && v >= p; p *= 10)
+    ++n;
+  return n;
+}
+
+// Writes the digits straight into place, back to front: formatting into a
+// temporary and copying it reads the digits back right after writing them
+// byte by byte, which stalls on the store-to-load forwarding.
 static bool append_u64_base(faf_builder *b, uint64_t v, unsigned base,
                             bool negative) {
-  char buf[24];
-  char *start = u64_digits(buf + sizeof(buf), v, base);
+  size_t n = u64_digit_count(v, base) + negative;
+  if (!builder_room(b, n))
+    return false;
+  char *start = builder_end(b);
+  u64_digits(start + n, v, base);
   if (negative)
-    *--start = '-';
-  return faf_builder_append(
-      b, (faf_string){.start = start, .end = buf + sizeof(buf)});
+    *start = '-';
+  b->len += n;
+  return true;
 }
 
 bool faf_builder_append_u64(faf_builder *b, uint64_t v) {
