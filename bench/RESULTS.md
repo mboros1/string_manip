@@ -83,6 +83,7 @@ esp32s3 rev 2, 240 MHz, ESP-IDF v6.1
 | 2026-09-28 `f564a6f75` pie: strlen as a second entry into the find_byte assembly; u | pie | 6,850 | 45,940 | 3,832 | 4,850 | 4,452 | 4,645 |  |  |  |
 | 2026-09-28 `52f9ed2a9` pie: strlen as its own lean assembly function | pie | 6,845 | 45,938 | 3,832 | 4,848 | 4,452 | 4,645 |  |  |  |
 | 2026-09-28 `3a98ba0ba` pie: strlen word loops with BNONE per byte (as the ROM strle | pie | 6,848 | 45,940 | 3,832 | 4,848 | 4,452 | 4,645 |  |  |  |
+| 2026-09-28 `a0eea12fc` pie: find_byte word loops with XOR + BNONE per byte; test fo | pie | 6,845 | 45,938 | 3,832 | 4,375 | 4,452 | 4,645 |  |  |  |
 
 **Kernels, MB/s (higher is better)**
 
@@ -96,3 +97,4 @@ esp32s3 rev 2, 240 MHz, ESP-IDF v6.1
 | 2026-09-28 `f564a6f75` pie: strlen as a second entry into the find_byte assembly; u | pie | 718 | 585 | 707 | 234 | 21.8 | 38.3 |
 | 2026-09-28 `52f9ed2a9` pie: strlen as its own lean assembly function | pie | 718 | 585 | 729 | 234 | 21.8 | 39.9 |
 | 2026-09-28 `3a98ba0ba` pie: strlen word loops with BNONE per byte (as the ROM strle | pie | 717 | 585 | 716 | 234 | 21.8 | 39.9 |
+| 2026-09-28 `a0eea12fc` pie: find_byte word loops with XOR + BNONE per byte; test fo | pie | 724 | 584 | 716 | 234 | 21.8 | 39.9 |
