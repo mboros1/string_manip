@@ -10,7 +10,7 @@ Noise: the ESP32 boards run the library and benchmarks from IRAM and repeat with
 
 ## Known trade-offs
 
-- **ESP32-S3, pie backend**: the PIE vector kernels are 3-10x faster than SWAR on long inputs. With the entry points in C (`38bd90f`), searches ending within the first ~100 bytes were slower than SWAR (~19% on 85-byte lines), depending on how GCC compiled the SWAR lead. `find_byte`, `find_bytes`, `strlen` and `mismatch` are now whole functions in assembly and no longer pay this; `ascii_prefix` still does. `-DFAF_BACKEND_SWAR` builds plain SWAR on the S3.
+- **ESP32-S3, pie backend**: with the PIE entry points in C (`38bd90f`), searches ending within the first ~100 bytes were up to 19% slower than plain SWAR, depending on how GCC compiled the SWAR lead (hardware loops, inlining). Since `7b638d5` all six PIE kernels are whole functions in assembly (`src/kernels/faf_kernels_pie.c`) and are faster than SWAR on short and long inputs. `-DFAF_BACKEND_SWAR` builds plain SWAR on the S3.
 
 ## Reproducing
 
@@ -87,6 +87,7 @@ esp32s3 rev 2, 240 MHz, ESP-IDF v6.1
 | 2026-09-28 `7d4b0dd95` pie: find_bytes in assembly (two words per loop, BNONE per b | pie | 5,918 | 45,928 | 2,900 | 4,375 | 3,455 | 3,715 |  |  |  |
 | 2026-09-28 `e52885f38` pie: mismatch in assembly (SSA8L/SRC funnel shift for unalig | pie | 5,912 | 45,928 | 2,900 | 4,375 | 3,455 | 3,715 |  |  |  |
 | 2026-09-28 `d5eacf2bb` bench: count_byte and ascii_prefix on short lines | pie | 5,912 | 45,928 | 2,900 | 4,375 | 3,455 | 3,712 |  |  |  |
+| 2026-09-28 `7b638d567` pie: count_byte and ascii_prefix in assembly; PIE kernels in | pie | 5,912 | 45,925 | 2,900 | 4,375 | 3,455 | 3,712 |  |  |  |
 
 **Kernels, MB/s (higher is better)**
 
@@ -104,3 +105,4 @@ esp32s3 rev 2, 240 MHz, ESP-IDF v6.1
 | 2026-09-28 `7d4b0dd95` pie: find_bytes in assembly (two words per loop, BNONE per b | pie | 724 | 585 | 716 | 234 | 21.8 | 38.3 |
 | 2026-09-28 `e52885f38` pie: mismatch in assembly (SSA8L/SRC funnel shift for unalig | pie | 724 | 585 | 715 | 415 | 21.8 | 39.9 |
 | 2026-09-28 `d5eacf2bb` bench: count_byte and ascii_prefix on short lines | pie | 724 | 584 | 715 | 415 | 21.8 | 39.9 |
+| 2026-09-28 `7b638d567` pie: count_byte and ascii_prefix in assembly; PIE kernels in | pie | 724 | 963 | 716 | 415 | 21.8 | 39.9 |

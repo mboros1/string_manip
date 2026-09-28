@@ -230,14 +230,12 @@ def cmd_report(args):
            "but rows that read files or call malloc/realloc can move about 5% "
            "between runs of the same code.", "",
            "## Known trade-offs", "",
-           "- **ESP32-S3, pie backend**: the PIE vector kernels are 3-10x faster "
-           "than SWAR on long inputs. With the entry points in C (`38bd90f`), "
-           "searches ending within the first ~100 bytes were slower than SWAR "
-           "(~19% on 85-byte lines), depending on how GCC compiled the SWAR lead. "
-           "`find_byte`, `find_bytes`, `strlen` and `mismatch` are now whole "
-           "functions in assembly and no longer pay this; `ascii_prefix` still "
-           "does. "
-           "`-DFAF_BACKEND_SWAR` builds plain SWAR on the S3.", "",
+           "- **ESP32-S3, pie backend**: with the PIE entry points in C (`38bd90f`), "
+           "searches ending within the first ~100 bytes were up to 19% slower than "
+           "plain SWAR, depending on how GCC compiled the SWAR lead (hardware loops, "
+           "inlining). Since `7b638d5` all six PIE kernels are whole functions in "
+           "assembly (`src/kernels/faf_kernels_pie.c`) and are faster than SWAR on "
+           "short and long inputs. `-DFAF_BACKEND_SWAR` builds plain SWAR on the S3.", "",
            "## Reproducing", "",
            "```sh",
            "git checkout <commit>",
