@@ -1,6 +1,6 @@
 // Runs every test suite on the device and reports over the serial console.
 // Each test file's main() is renamed <file>_main at compile time (see
-// CMakeLists.txt); run.py watches for the FAF_TESTS_* lines.
+// CMakeLists.txt); tools/esp32_run.py watches for the FAF_TESTS_* lines.
 
 #include "faf_string_mem.h"
 #include "faf_test.h"
@@ -19,7 +19,7 @@ void app_main(void) {
   int suites = 0, failed = 0;
 
   // Boards on the chip's own USB drop output until the host reopens the port
-  // after the reset: give run.py a moment to start listening
+  // after the reset: give the runner a moment to start listening
   vTaskDelay(pdMS_TO_TICKS(1000));
   printf("FAF_TESTS_BEGIN pools=%d slots=%d\n", FAF_NPOOLS, FAF_POOL_SLOTS);
 #define TEST_FILE(name)                                                        \

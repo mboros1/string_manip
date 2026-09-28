@@ -1,0 +1,8 @@
+# Measure optimized code at full clock (ESP-IDF defaults to -Og, and the
+# original ESP32 to 160 MHz)
+CONFIG_COMPILER_OPTIMIZATION_PERF=y
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
+# The benchmarks keep a few KB on the stack
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=16384
+# They run for a while on the main task without yielding
+CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU0=n

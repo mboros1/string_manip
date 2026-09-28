@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 
-# Builds and flashes the test app, resets the board and relays its serial
-# output until the FAF_TESTS_END line. Exits 0 only if every suite passed.
+# Builds and flashes an ESP-IDF app (the tests or the benchmarks), resets the
+# board and relays its serial output between the FAF_<APP>_BEGIN and
+# FAF_<APP>_END lines, also saving it to obj/<app>-<target>.log. For the
+# tests, exits 0 only if every suite passed.
 #
 # Needs the ESP-IDF environment (idf.py, pyserial): run it through
-# `make esp32_test`, which sources export.sh first.
+# `make esp32_test` or `make esp32_bench`, which source export.sh first.
 
 import argparse
 import glob
@@ -17,8 +19,9 @@ import time
 import serial
 from serial.tools import list_ports
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-ROOT = os.path.dirname(os.path.dirname(HERE))
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+APPS = {"tests": os.path.join(ROOT, "tests", "esp32"),
+        "bench": os.path.join(ROOT, "bench", "esp32")}
 
 # A panic or an unexpected reboot ends the run: the tests would never finish
 CRASH = re.compile(r"Guru Meditation|abort\(\) was called|Backtrace:|rst:0x")
@@ -72,6 +75,7 @@ def reset_and_open(port):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--app", choices=sorted(APPS), default="tests")
     parser.add_argument("--port", default=os.environ.get("ESPPORT") or None)
     parser.add_argument("--target", default="esp32",
                         help="chip, e.g. esp32, esp32s3, esp32c3 (default: esp32)")
@@ -82,10 +86,12 @@ def main():
     args = parser.parse_args()
     port = args.port or find_port()
 
-    # a build directory per chip, with the generated sdkconfig kept in it
-    build_dir = os.path.join(ROOT, "obj", args.target)
+    # a build directory per app and chip, with the generated sdkconfig in it
+    build_dir = os.path.join(ROOT, "obj", f"{args.app}-{args.target}")
+    marker = f"FAF_{args.app.upper()}"
+    log_path = build_dir + ".log"
     if not args.no_flash:
-        cmd = ["idf.py", "-C", HERE, "-B", build_dir,
+        cmd = ["idf.py", "-C", APPS[args.app], "-B", build_dir,
                f"-DIDF_TARGET={args.target}",
                f"-DSDKCONFIG={os.path.join(build_dir, 'sdkconfig')}",
                "-p", port, "build", "flash"]
@@ -96,6 +102,7 @@ def main():
     ser = reset_and_open(port)
     started = time.monotonic()
     begun, buf = False, b""
+    log = open(log_path, "w")
     try:
         while time.monotonic() - started < args.timeout:
             try:
@@ -112,24 +119,31 @@ def main():
             *lines, buf = buf.split(b"\n")
             for raw in lines:
                 line = raw.decode("utf-8", "replace").rstrip("\r")
-                if line.startswith("FAF_TESTS_BEGIN"):
+                if line.startswith(marker + "_BEGIN"):
                     begun = True
                 elif begun and CRASH.search(line):
                     print(line)
                     sys.exit("esp32: the board crashed or rebooted during the tests")
                 if begun:
                     print(line, flush=True)
+                    log.write(line + "\n")
+                if not line.startswith(marker + "_END"):
+                    continue
+                took = time.monotonic() - started
                 m = re.match(r"FAF_TESTS_END suites=(\d+) failed=(\d+)", line)
                 if m:
                     suites, failed = int(m.group(1)), int(m.group(2))
-                    took = time.monotonic() - started
                     print(f"esp32: {suites - failed}/{suites} test files passed "
-                          f"on {port} in {took:.1f} s")
+                          f"on {port} in {took:.1f} s (log: {log_path})")
                     sys.exit(1 if failed else 0)
+                print(f"esp32: {args.app} finished on {port} in {took:.1f} s "
+                      f"(log: {log_path})")
+                sys.exit(0)
     finally:
         ser.close()
-    sys.exit(f"esp32: no FAF_TESTS_END within {args.timeout:.0f} s"
-             + ("" if begun else " (and no FAF_TESTS_BEGIN: is the app flashed?)"))
+        log.close()
+    sys.exit(f"esp32: no {marker}_END within {args.timeout:.0f} s"
+             + ("" if begun else f" (and no {marker}_BEGIN: is the app flashed?)"))
 
 
 if __name__ == "__main__":

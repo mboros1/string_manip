@@ -104,6 +104,8 @@ static void size_sweep(void) {
     size_t len = sizes[i] - 1;
     // as many as fit in one region, at most 64
     size_t per_region = POOL_BYTES / (faf_slots_for(len) * FAF_SLOT_BYTES);
+    if (per_region == 0)
+      continue; // doesn't fit in one region with this configuration
     int batch = per_region < 64 ? (int)per_region : 64;
     int ops = SWEEP_OPS / batch * batch;
     snprintf(names[i], sizeof names[i], "%zu bytes, batches of %d",
@@ -178,7 +180,7 @@ static void churn_region(int live) {
 
   faf_region cur = faf_region_acquire();
   for (int i = 0; i < live; ++i)
-    table[i] = faf_string_copy(cur, faf_string_init_n(lines[i], 16));
+    table[i] = faf_string_copy(cur, faf_string_init_n(lines[i % NLINES], 16));
 
   size_t acc = 0;
   for (int step = 0; step < CHURN_STEPS; ++step) {
@@ -228,7 +230,7 @@ static void churn_malloc(int live) {
 
   size_t live_bytes = 0;
   for (int i = 0; i < live; ++i) {
-    table[i] = strndup(lines[i], 16);
+    table[i] = strndup(lines[i % NLINES], 16);
     table_len[i] = 16;
     live_bytes += 17;
   }

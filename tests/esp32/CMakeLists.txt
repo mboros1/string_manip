@@ -1,5 +1,6 @@
 # ESP-IDF app that runs every test suite on an ESP32 and reports over serial.
-# Build, flash and collect the results with `make esp32_test` (see run.py).
+# Build, flash and collect the results with `make esp32_test`
+# (tools/esp32_run.py).
 
 cmake_minimum_required(VERSION 3.22)
 

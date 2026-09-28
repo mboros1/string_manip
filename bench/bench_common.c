@@ -55,8 +55,10 @@ void group_end(void) {
     printf("%s", group.failed[i] ? DIM : i == best && compared > 1 ? GREEN : "");
     if (group.unit == NS_PER_OP)
       printf("%9.1f ns/op", v);
-    else
+    else if (v >= 1.0)
       printf("%9.2f GB/s ", v);
+    else // microcontrollers: GB/s would round to 0.0x
+      printf("%9.1f MB/s ", v * 1000);
     printf("%s", RESET);
 
     // how many times longer this takes than the fastest, padded so the

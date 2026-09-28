@@ -129,16 +129,21 @@ check_small:
 	$(MAKE) OBJ_DIR=$(OBJ_DIR)/small BIN_DIR=$(BIN_DIR)/small \
 		EXTRA_FLAGS="$(EXTRA_FLAGS) $(SMALL_POOLS)" all_tests
 
-# Build the tests for an ESP32, flash them and collect the results over
-# serial (tests/esp32/). Needs ESP-IDF; IDF_TARGET picks the chip (esp32,
-# esp32s3, ...) and ESPPORT the serial port when more than one is connected.
+# Build the tests (or benchmarks) for an ESP32, flash them and collect the
+# output over serial (tests/esp32/, bench/esp32/, tools/esp32_run.py). Needs
+# ESP-IDF; IDF_TARGET picks the chip (esp32, esp32s3, ...) and ESPPORT the
+# serial port when more than one is connected.
 IDF_PATH ?= $(HOME)/esp/esp-idf-v6.1
 IDF_TARGET ?= esp32
 ESPPORT ?=
+ESP32_RUN = bash -c '. "$(IDF_PATH)/export.sh" >/dev/null && \
+	python tools/esp32_run.py --target $(IDF_TARGET) \
+		$(if $(ESPPORT),--port $(ESPPORT)) "$$@"' esp32_run
 esp32_test:
-	@bash -c '. "$(IDF_PATH)/export.sh" >/dev/null && \
-		python tests/esp32/run.py --target $(IDF_TARGET) \
-			$(if $(ESPPORT),--port $(ESPPORT))'
+	@$(ESP32_RUN) --app=tests
+
+esp32_bench:
+	@$(ESP32_RUN) --app=bench
 
 # Built freestanding, the library may import only memcpy, memset, memmove and
 # memcmp, which GCC and Clang require from every environment. Apple targets
@@ -188,6 +193,6 @@ clean:
 -include $(wildcard $(OBJ_DIR)/*.d)
 
 .PHONY: all clean all_tests test test_framework test_explorer config bench \
-        check_backends check_small check_freestanding esp32_test \
+        check_backends check_small check_freestanding esp32_test esp32_bench \
         generate_random_strings \
         $(UTIL_TARGETS)

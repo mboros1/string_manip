@@ -11,7 +11,20 @@
 #include <stddef.h>
 
 #define RUNS 5
+// Input records; lowered on small targets (the ESP32 app uses 400)
+#ifndef NLINES
 #define NLINES 20000
+#endif
+
+// The io group needs a file system (temporary files, getline,
+// open_memstream); microcontroller builds leave it out
+#ifndef FAF_BENCH_HAVE_FILES
+#ifdef ESP_PLATFORM
+#define FAF_BENCH_HAVE_FILES 0
+#else
+#define FAF_BENCH_HAVE_FILES 1
+#endif
+#endif
 
 // Written by every benchmark so the compiler can't drop the work.
 extern volatile size_t sink;

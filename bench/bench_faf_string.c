@@ -181,7 +181,11 @@ static void split_owned(void) {
 
 /* ---- 4. Kernels: SIMD backend vs scalar reference vs libc ---- */
 
-#define BIG (64 * 1024)
+// Buffer for the throughput kernels; lowered on small targets
+#ifndef BENCH_BIG
+#define BENCH_BIG (64 * 1024)
+#endif
+#define BIG BENCH_BIG
 static char big[BIG + 64];
 
 // Run `expr` over every line (short inputs) or over `big` (throughput).
@@ -348,7 +352,9 @@ static const struct {
 } groups[] = {
     {"strings", "per-record processing, small copies, splitting", bench_strings},
     {"alloc", "size sweep, region overhead, churn, string growth", bench_alloc},
+#if FAF_BENCH_HAVE_FILES
     {"io", "reading lines, CSV transform, word count, format/parse", bench_io},
+#endif
     {"kernels", "SIMD kernels vs scalar reference vs libc", bench_kernels},
 };
 #define NGROUPS (sizeof(groups) / sizeof(groups[0]))
@@ -385,6 +391,8 @@ int main(int argc, char **argv) {
   printf("\n%sfaf_string benchmarks%s\n", BOLD, RESET);
   printf("%sbackend %s, best of %d runs, fastest in each group in green%s\n",
          DIM, FAF_BACKEND_NAME, RUNS, RESET);
+  printf("%s%d pools x %d slots of %d bytes, %d input lines%s\n", DIM,
+         FAF_NPOOLS, FAF_POOL_SLOTS, FAF_SLOT_BYTES, NLINES, RESET);
 
   for (size_t g = 0; g < NGROUPS; ++g)
     if (!any || selected[g])
