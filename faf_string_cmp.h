@@ -8,10 +8,11 @@
 // Returns -1 if str1 < str2.
 // Returns 0 if str1 == str2.
 // Returns 1 if str1 > str2.
+// Bytes compare as unsigned, like memcmp/strcmp; a proper prefix is smaller.
 //
 // Runtime Complexity; O(n)
 // Memory Complexity: O(1)
-int faf_string_cmp(faf_string* str1, faf_string* str2);
+int faf_string_cmp(faf_string str1, faf_string str2);
 
 
 

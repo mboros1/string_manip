@@ -6,48 +6,93 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <sys/mman.h>
+#include <unistd.h>
 
 const char *str1_1 = "hello";
 const char *str1_2 = "hello";
-void test_str1() {
+void test_str1(void) {
   printf("Testing string 1:1 to 1:2...\n");
   faf_string str1 = faf_string_init(str1_1);
   faf_string str2 = faf_string_init(str1_2);
 
-  int cmp = faf_string_cmp(&str1, &str2);
+  int cmp = faf_string_cmp(str1, str2);
   int expected = 0;
   ASSERT_INT_EQ(expected, cmp, "Array compare incorrect");
 }
 
 const char *str2_1 = "hello";
 const char *str2_2 = "hello1";
-void test_str2() {
+void test_str2(void) {
   printf("Testing string 2:1 to 2:2...\n");
   faf_string str1 = faf_string_init(str2_1);
   faf_string str2 = faf_string_init(str2_2);
 
-  int cmp = faf_string_cmp(&str1, &str2);
+  int cmp = faf_string_cmp(str1, str2);
   int expected = -1;
   ASSERT_INT_EQ(expected, cmp, "Array compare incorrect");
 }
 
 const char *str3_1 = "b";
 const char *str3_2 = "a";
-void test_str3() {
+void test_str3(void) {
   printf("Testing string 3:1 to 3:2...\n");
   faf_string str1 = faf_string_init(str3_1);
   faf_string str2 = faf_string_init(str3_2);
 
-  int cmp = faf_string_cmp(&str1, &str2);
+  int cmp = faf_string_cmp(str1, str2);
   int expected = 1;
   ASSERT_INT_EQ(expected, cmp, "Array compare incorrect");
 }
 
 // Test case definitions
+void test_no_overread(void) {
+  // put the shorter string flush against an unreadable page: reading past its
+  // end would crash
+  long page = sysconf(_SC_PAGESIZE);
+  char *mem = mmap(NULL, 2 * page, PROT_READ | PROT_WRITE,
+                   MAP_PRIVATE | MAP_ANON, -1, 0);
+  ASSERT_TRUE(mem != MAP_FAILED, "mmap failed");
+  if (mem == MAP_FAILED)
+    return;
+  ASSERT_INT_EQ(0, mprotect(mem + page, page, PROT_NONE), "mprotect failed");
+
+  const char *longer = "abcdefghijklmnopqrstuvwxyz0123456789";
+  for (int n = 0; n <= 35; ++n) {
+    char *end = mem + page;
+    memcpy(end - n, longer, n);
+    faf_string a = faf_string_init(longer);
+    faf_string b = faf_string_init_n(end - n, n);
+    ASSERT_INT_EQ(1, faf_string_cmp(a, b), "Longer string should compare greater");
+    ASSERT_INT_EQ(-1, faf_string_cmp(b, a), "Shorter string should compare less");
+  }
+  munmap(mem, 2 * page);
+}
+
+void test_tail_mismatch(void) {
+  // a difference in the final partial chunk
+  faf_string a = faf_string_init("0123456789abcdefXYZ1");
+  faf_string b = faf_string_init("0123456789abcdefXYZ2");
+  ASSERT_INT_EQ(-1, faf_string_cmp(a, b), "Tail mismatch not found");
+  ASSERT_INT_EQ(1, faf_string_cmp(b, a), "Tail mismatch not found");
+  ASSERT_INT_EQ(0, faf_string_cmp(a, a), "Equal strings differ");
+}
+
+void test_unsigned_bytes(void) {
+  // bytes compare unsigned, like memcmp: 0xC3 sorts after 'z'
+  faf_string hi = faf_string_init("\xC3\xA9");
+  faf_string lo = faf_string_init("z");
+  ASSERT_INT_EQ(1, faf_string_cmp(hi, lo), "High byte should sort after ASCII");
+  ASSERT_INT_EQ(-1, faf_string_cmp(lo, hi), "ASCII should sort before high byte");
+}
+
 test_case_t string_cmp_tests[] = {
     {"equal_strings", test_str1},
     {"first_shorter", test_str2},
-    {"second_smaller", test_str3}
+    {"second_smaller", test_str3},
+    {"no_overread", test_no_overread},
+    {"tail_mismatch", test_tail_mismatch},
+    {"unsigned_bytes", test_unsigned_bytes},
 };
 
 // Setup and teardown functions

@@ -1,32 +1,21 @@
 #include "faf_string_concat.h"
 #include "faf_string_mem.h"
 
-faf_string* faf_string_concat(pool_t pool, faf_string str1, faf_string str2) {
-  faf_string *alloc = faf_string_alloc(pool);
+faf_string faf_string_concat(faf_region r, faf_string str1, faf_string str2) {
+  size_t len1 = faf_string_len(str1);
+  size_t len2 = faf_string_len(str2);
 
-  const char *data = str1.start;
-  alloc->start = (const char *)&mempools[pool * BLOCK_LEN + pool_idxs[pool]];
-  for (; data + 16 <= str1.end; data += 16) {
-    simde__m128i chars = simde_mm_loadu_si128((const simde__m128 *)data);
-    int idx = pool_idxs[pool]++;
-    mempools[pool * BLOCK_LEN + idx].data = chars;
-  }
-  int remaining = str1.end - data;
-  alloc->end =
-      (const char
-           *)(((uintptr_t)&mempools[pool * BLOCK_LEN + pool_idxs[pool]]) +
-              remaining);
-  if (remaining > 0) {
-    int idx = pool_idxs[pool]++;
-    char buffer[16] = {0};
-    for (int i = 0; i < remaining; ++i) {
-      buffer[i] = data[i];
-    }
-    // TODO: fill out the rest of the buffer with the beginning of the next string
-    simde__m128i chars = simde_mm_loadu_si128((const simde__m128 *)buffer);
-    mempools[pool * BLOCK_LEN + idx].data = chars;
-  }
-  // TODO: start the next string where we left off filling out the remaining buffer.
+  // one contiguous span for both strings plus the NUL
+  faf_span sp = faf_reserve(r, faf_slots_for(len1 + len2));
+  if (!sp.ptr)
+    return FAF_STRING_NONE;
 
-  return alloc;
+  char *dst = (char *)sp.ptr;
+  char *dst_end = dst + sp.slots * FAF_SLOT_BYTES;
+  faf_memcpy(dst, str1.start, len1);
+  faf_memcpy(dst + len1, str2.start, len2);
+
+  size_t len = len1 + len2;
+  faf_memset(dst + len, 0, (size_t)(dst_end - (dst + len)));
+  return (faf_string){.start = dst, .end = dst + len};
 }

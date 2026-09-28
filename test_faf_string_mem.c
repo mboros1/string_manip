@@ -5,59 +5,7 @@
 #include <stdio.h>
 #include <string.h>
 
-void test_next_pool() {
-  printf("Testing pool initialization...\n");
-  pool_t pool = next_pool();
-  pool_off_t curr_idx = get_pool_offset(pool);
-  pool_off_t remaining_space = get_pool_remaining(pool);
-
-  ASSERT_INT_EQ(0, curr_idx, "Current index incorrect");
-  ASSERT_INT_EQ(1024, remaining_space, "Remaining space is incorrect");
-}
-
-void test_allocations() {
-  printf("Testing allocation...\n");
-  pool_t pool = next_pool();
-
-  faf_string *str1 = faf_string_alloc(pool);
-  pool_off_t curr_idx = get_pool_offset(pool);
-  pool_off_t remaining_space = get_pool_remaining(pool);
-
-  ASSERT_INT_EQ(1, curr_idx, "Current index incorrect");
-  ASSERT_INT_EQ(1023, remaining_space, "Remaining space is incorrect");
-
-  const char *test_str = "Hello World!\n";
-  *str1 = faf_string_init(test_str);
-
-  printf("Test printing allocated string: \'%s\'", str1->start);
-
-  int actual = strcmp(test_str, str1->start);
-  int expected = 0;
-
-  ASSERT_INT_EQ(expected, actual, "String compare between allocated string and test string failed");
-}
-
-void test_string_copy_short() {
-  printf("Testing string copy short string (under 16 bytes)...\n");
-  pool_t pool = next_pool();
-
-  const char *base_str = "hello world";
-
-  faf_string str1 = faf_string_init(base_str);
-
-  faf_string *str1_copy = faf_string_copy(pool, str1);
-
-  int actual = strcmp(base_str, str1_copy->start);
-  int expected = 0;
-
-  ASSERT_INT_EQ(expected, actual, "String compare between allocated string and test string failed");
-}
-
-void test_string_copy_long() {
-  printf(
-      "Testing string copy long string (several multiples of 16 bytes)...\n");
-  pool_t pool = next_pool();
-  const char *base_str =
+static const char *long_str =
       "LoJxoUH9kIUGg8EhZvChVx5tKlagaCBX6cGDKR7aDNWW2XMl4mhOxxM2QG4Mex0fXjfHuTFf"
       "1gdP5v6CjbUHgePZgwtZISwIrmEjwhgBGYwSQuffc2uEgW5tP4eWZURC19apUQaUNdfeVPBB"
       "Lx1yAnu4i0P4G7lnWwaoKk3hGoaM3sM1YAv4WZM1UGjcwPybJZhWn8r8Uabal2usCCODlBDE"
@@ -87,43 +35,192 @@ void test_string_copy_long() {
       "sA59h1QawuvzJu9Csj96yE2OffYYbu7ybj6z2WGPB3HRJrK7gr8aN7dQoYtxo5ZQ4MBBvyMJ"
       "KI0s737pWcAPRNyCAUUTRPssag9wmvxpMUzdTCO7pQ93";
 
-  faf_string str1 = faf_string_init(base_str);
+void test_acquire(void) {
+  faf_region r = faf_region_acquire();
 
-  faf_string *str1_copy = faf_string_copy(pool, str1);
+  ASSERT_TRUE(faf_region_valid(r), "Acquired region is not valid");
+  ASSERT_INT_EQ(0, (int)faf_region_used(r), "New region is not empty");
+  ASSERT_INT_EQ(FAF_POOL_SLOTS, (int)faf_region_remaining(r),
+                "New region capacity incorrect");
 
-  int actual = strcmp(base_str, str1_copy->start);
-  int expected = 0;
-
-  ASSERT_INT_EQ(expected, actual, "String compare between allocated string and test string failed");
+  faf_region_release(r);
 }
 
-void test_alloc_pool_size_change() {
-  printf("Testing allocations properly changes the size of the pool\n");
+void test_acquire_distinct(void) {
+  // two acquires without any allocation in between must not share a pool
+  faf_region a = faf_region_acquire();
+  faf_region b = faf_region_acquire();
 
-  pool_t pool = next_pool();
+  ASSERT_TRUE(faf_region_valid(a) && faf_region_valid(b),
+              "Acquired regions are not valid");
+  ASSERT_TRUE(a.pool != b.pool, "Two live regions share a pool");
 
-  ASSERT_INT_EQ(0, get_pool_offset(pool), "Initial pool index incorrect");
-  ASSERT_INT_EQ(1024, get_pool_remaining(pool), "Initial pool capacity incorrect");
+  faf_region_release(a);
+  faf_region_release(b);
+}
 
-  for (int i = 0; i < 10; ++i) {
-    (void)faf_string_alloc(pool);
+void test_acquire_exhausted(void) {
+  faf_region all[FAF_NPOOLS];
+  for (int i = 0; i < FAF_NPOOLS; ++i) {
+    all[i] = faf_region_acquire();
+    ASSERT_TRUE(faf_region_valid(all[i]), "Acquire failed with pools free");
   }
-  ASSERT_INT_EQ(10, get_pool_offset(pool), "After allocation pool index incorrect");
-  ASSERT_INT_EQ(1014, get_pool_remaining(pool), "After allocation pool capacity incorrect");
 
-  faf_string_pool_reset(pool);
+  faf_region extra = faf_region_acquire();
+  ASSERT_FALSE(faf_region_valid(extra), "Acquire succeeded with no free pools");
 
-  ASSERT_INT_EQ(0, get_pool_offset(pool), "After reset pool index incorrect");
-  ASSERT_INT_EQ(1024, get_pool_remaining(pool), "After reset pool capacity incorrect");
+  faf_region_release(all[3]);
+  extra = faf_region_acquire();
+  ASSERT_TRUE(faf_region_valid(extra), "Acquire failed after a release");
+
+  faf_region_release(extra);
+  for (int i = 0; i < FAF_NPOOLS; ++i) {
+    faf_region_release(all[i]); // all[3] is stale: must be a no-op
+  }
+}
+
+void test_reserve(void) {
+  faf_region r = faf_region_acquire();
+
+  faf_span a = faf_reserve(r, 10);
+  faf_span b = faf_reserve(r, 5);
+  ASSERT_TRUE(a.ptr != NULL && b.ptr != NULL, "Reserve failed");
+  ASSERT_TRUE(b.ptr == a.ptr + 10, "Spans are not contiguous");
+  ASSERT_TRUE(((uintptr_t)a.ptr & 15) == 0, "Span is not 16 byte aligned");
+  ASSERT_INT_EQ(15, (int)faf_region_used(r), "Used slots incorrect");
+  ASSERT_INT_EQ(FAF_POOL_SLOTS - 15, (int)faf_region_remaining(r),
+                "Remaining slots incorrect");
+
+  faf_region_release(r);
+}
+
+void test_reserve_bounds(void) {
+  faf_region r = faf_region_acquire();
+
+  faf_span too_big = faf_reserve(r, FAF_POOL_SLOTS + 1);
+  ASSERT_TRUE(too_big.ptr == NULL, "Oversized reserve succeeded");
+  ASSERT_INT_EQ(0, (int)faf_region_used(r), "Failed reserve moved the cursor");
+
+  faf_span all = faf_reserve(r, FAF_POOL_SLOTS);
+  ASSERT_TRUE(all.ptr != NULL, "Reserving the whole pool failed");
+
+  faf_span one_more = faf_reserve(r, 1);
+  ASSERT_TRUE(one_more.ptr == NULL, "Reserve past capacity succeeded");
+  ASSERT_INT_EQ(FAF_POOL_SLOTS, (int)faf_region_used(r),
+                "Failed reserve moved the cursor");
+
+  faf_region_release(r);
+}
+
+void test_release_invalidates(void) {
+  faf_region r = faf_region_acquire();
+  faf_region_release(r);
+
+  ASSERT_FALSE(faf_region_valid(r), "Handle still valid after release");
+  ASSERT_TRUE(faf_reserve(r, 1).ptr == NULL, "Reserve on stale handle succeeded");
+
+  // the pool comes back with a new generation, so the old handle stays stale
+  faf_region again = faf_region_acquire();
+  ASSERT_TRUE(again.pool == r.pool, "Expected the same pool back");
+  ASSERT_FALSE(faf_region_valid(r), "Stale handle valid after reacquire");
+  ASSERT_INT_EQ(0, (int)faf_region_used(again), "Reacquired region not empty");
+
+  faf_region_release(r); // stale: must not release `again`
+  ASSERT_TRUE(faf_region_valid(again), "Stale release freed the new owner");
+  faf_region_release(again);
+}
+
+void test_copy_short(void) {
+  faf_region r = faf_region_acquire();
+
+  const char *base_str = "hello world";
+  faf_string copy = faf_string_copy(r, faf_string_init(base_str));
+
+  ASSERT_TRUE(copy.start != base_str, "Copy did not allocate");
+  ASSERT_TRUE(faf_mem_contains(copy.start, 1), "Copy is not in pool storage");
+  ASSERT_STR_EQ(base_str, copy.start, "Copied string differs");
+
+  faf_region_release(r);
+}
+
+void test_copy_long(void) {
+  faf_region r = faf_region_acquire();
+
+  faf_string copy = faf_string_copy(r, faf_string_init(long_str));
+
+  ASSERT_INT_EQ((int)strlen(long_str), (int)faf_string_len(copy),
+                "Copied length differs");
+  ASSERT_STR_EQ(long_str, copy.start, "Copied string differs");
+  ASSERT_INT_EQ((int)faf_slots_for(strlen(long_str)), (int)faf_region_used(r),
+                "Copy used the wrong number of slots");
+
+  faf_region_release(r);
+}
+
+void test_copy_nul_terminated(void) {
+  // dirty the pool first so a missing terminator can't be hidden by zeroed
+  // static memory
+  faf_region r = faf_region_acquire();
+  faf_span sp = faf_reserve(r, 8);
+  memset(sp.ptr, 'X', 8 * FAF_SLOT_BYTES);
+  uint16_t pool = r.pool;
+  faf_region_release(r);
+
+  r = faf_region_acquire();
+  ASSERT_TRUE(r.pool == pool, "Expected the dirty pool back");
+
+  // lengths on and around the 16 byte boundary
+  const char *src = "0123456789abcdef0123456789ABCDEF!";
+  for (size_t len = 0; len <= 33; ++len) {
+    faf_string copy = faf_string_copy(r, faf_string_init_n(src, len));
+    ASSERT_INT_EQ((int)len, (int)strlen(copy.start),
+                  "Copy is not NUL terminated at its length");
+    ASSERT_TRUE(memcmp(src, copy.start, len) == 0, "Copied bytes differ");
+  }
+
+  faf_region_release(r);
+}
+
+void test_copy_from_region(void) {
+  // copying a string that already lives in pool storage takes the masked
+  // tail path; the bytes after it must not leak into the copy
+  faf_region r = faf_region_acquire();
+  faf_string a = faf_string_copy(r, faf_string_init("abcdefghijklmnopqrs"));
+  faf_string b = faf_string_copy(r, faf_string_init("ZZZZZZZZZZZZZZZZZZZZZZZZ"));
+  faf_string prefix = {.start = a.start, .end = a.start + 17};
+
+  faf_string c = faf_string_copy(r, prefix);
+  ASSERT_STR_EQ("abcdefghijklmnopq", c.start, "Copy from region differs");
+  ASSERT_STR_EQ("ZZZZZZZZZZZZZZZZZZZZZZZZ", b.start, "Neighbour was clobbered");
+
+  faf_region_release(r);
+}
+
+void test_copy_out_of_space(void) {
+  faf_region r = faf_region_acquire();
+  faf_reserve(r, FAF_POOL_SLOTS - 1);
+
+  faf_string fits = faf_string_copy(r, faf_string_init("short"));
+  faf_string none = faf_string_copy(r, faf_string_init("short"));
+  ASSERT_FALSE(faf_string_is_none(fits), "Copy into the last slot failed");
+  ASSERT_TRUE(faf_string_is_none(none), "Copy into a full region succeeded");
+
+  faf_region_release(r);
 }
 
 // Test case definitions
 test_case_t string_mem_tests[] = {
-    {"pool_initialization", test_next_pool},
-    {"allocation", test_allocations},
-    {"string_copy_short", test_string_copy_short},
-    {"string_copy_long", test_string_copy_long},
-    {"pool_size_change", test_alloc_pool_size_change}
+    {"acquire", test_acquire},
+    {"acquire_distinct", test_acquire_distinct},
+    {"acquire_exhausted", test_acquire_exhausted},
+    {"reserve", test_reserve},
+    {"reserve_bounds", test_reserve_bounds},
+    {"release_invalidates", test_release_invalidates},
+    {"copy_short", test_copy_short},
+    {"copy_long", test_copy_long},
+    {"copy_nul_terminated", test_copy_nul_terminated},
+    {"copy_from_region", test_copy_from_region},
+    {"copy_out_of_space", test_copy_out_of_space},
 };
 
 // Setup and teardown functions

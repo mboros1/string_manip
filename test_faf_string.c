@@ -4,6 +4,8 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <sys/mman.h>
+#include <unistd.h>
 
 // Helper function to print faf_string
 void print_faf_string(faf_string str) {
@@ -11,7 +13,7 @@ void print_faf_string(faf_string str) {
 }
 
 // Test function for faf_string_init
-void test_faf_string_init() {
+void test_faf_string_init(void) {
     printf("Testing faf_string_init...\n");
     const char *test_str = "Hello, World!";
     faf_string str = faf_string_init(test_str);
@@ -24,7 +26,7 @@ void test_faf_string_init() {
 }
 
 // Test function for faf_string_init with empty string
-void test_faf_string_init_empty() {
+void test_faf_string_init_empty(void) {
     printf("Testing faf_string_init with empty string...\n");
     const char *test_str = "";
     faf_string str = faf_string_init(test_str);
@@ -37,7 +39,7 @@ void test_faf_string_init_empty() {
 }
 
 // Test function for faf_string_init_n
-void test_faf_string_init_n() {
+void test_faf_string_init_n(void) {
     printf("Testing faf_string_init_n...\n");
     const char * test_str = "Hello, World!";
     faf_string str = faf_string_init_n(test_str, strlen(test_str));
@@ -50,7 +52,7 @@ void test_faf_string_init_n() {
 }
 
 // Test function for faf_string_init_n with empty string
-void test_faf_string_init_n_empty() {
+void test_faf_string_init_n_empty(void) {
     printf("Testing faf_string_init_n with empty string...\n");
     const char *test_str = "";
     faf_string str = faf_string_init_n(test_str, strlen(test_str));
@@ -62,12 +64,48 @@ void test_faf_string_init_n_empty() {
     ASSERT_INT_EQ(expected, actual, "String lengths do not match");
 }
 
+void test_strlen_lengths(void) {
+  // every length and start alignment in the first few blocks
+  char buf[96];
+  for (size_t align = 0; align < 16; ++align) {
+    for (size_t len = 0; len < 64; ++len) {
+      memset(buf, 'x', sizeof(buf));
+      buf[align + len] = '\0';
+      ASSERT_INT_EQ((int)len, (int)faf_string_strlen(buf + align),
+                    "strlen incorrect");
+    }
+  }
+}
+
+void test_strlen_page_boundary(void) {
+  // Put each string so its NUL is the last byte of a readable page, followed
+  // by an unreadable page. A 16 byte load that crosses into it would crash.
+  long page = sysconf(_SC_PAGESIZE);
+  char *mem = mmap(NULL, 2 * page, PROT_READ | PROT_WRITE,
+                   MAP_PRIVATE | MAP_ANON, -1, 0);
+  ASSERT_TRUE(mem != MAP_FAILED, "mmap failed");
+  if (mem == MAP_FAILED)
+    return;
+  ASSERT_INT_EQ(0, mprotect(mem + page, page, PROT_NONE), "mprotect failed");
+
+  memset(mem, 'x', page);
+  mem[page - 1] = '\0';
+  for (size_t len = 0; len < 40; ++len) {
+    char *str = mem + page - 1 - len;
+    ASSERT_INT_EQ((int)len, (int)faf_string_strlen(str),
+                  "strlen at page boundary incorrect");
+  }
+  munmap(mem, 2 * page);
+}
+
 // Test case definitions
 test_case_t string_init_tests[] = {
     {"string_init", test_faf_string_init},
     {"string_init_empty", test_faf_string_init_empty},
     {"string_init_n", test_faf_string_init_n},
-    {"string_init_n_empty", test_faf_string_init_n_empty}
+    {"string_init_n_empty", test_faf_string_init_n_empty},
+    {"strlen_lengths", test_strlen_lengths},
+    {"strlen_page_boundary", test_strlen_page_boundary},
 };
 
 // Setup and teardown functions

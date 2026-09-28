@@ -25,7 +25,12 @@ jobs:
     - name: Run all tests
       if: success()
       run: |
-        ./bin/test_faf_string
-        ./bin/test_faf_string_mem
-        ./bin/test_faf_string_strsplit
-        ./bin/test_faf_string_cmp
+        make all_tests
+
+    - name: Run tests on the scalar backend
+      run: |
+        make check_backends
+
+    - name: Check the library needs no libc memory functions
+      run: |
+        make check_freestanding

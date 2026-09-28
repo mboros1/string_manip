@@ -1,90 +1,151 @@
 #include "faf_string_mem.h"
-#include <simde/x86/sse2.h>
-#include <stdint.h>
+#include "faf_kernels.h"
 
 /* 2024-07-23
  * This defines the global dynamic allocator for the FAF string library.
- * Allocation strategy is a pool of monotonic pools. Starting at the first pool,
- * first block, each allocation increments to the next data block until the last
- * block is claimed. When all blocks are claimed, the allocator moves to the
- * next pool in the list. When a block is freed, the only action taken is that
- * the status flag is cleared for that data block. A memory pool is only
- * reclaimed when all flags are cleared.
  *
- * The potential downside I'm seeing is if a program has a heavy fragmentation
- * pattern, memory can be quickly depleted. I'll roll with this for now and
- * develop a series of tests to get an understanding of the performance profile.
- *
- * 2024-07-24
- * Thinking about this some more; I'm just going to start with a pool of
- * monotonic allocators.
+ * 2026-09-27
+ * Reworked into a region allocator. Three layers:
+ *   1. Backing memory: static slot storage, private to this file.
+ *   2. Region lifetime: explicit acquire/release. Ownership (`in_use`) is kept
+ *      separate from the cursor, and a generation per pool catches handles
+ *      used after release.
+ *   3. Allocation: contiguous span reservation with a bounds check. The bump
+ *      policy is a strategy function so a concurrent variant can be added by
+ *      writing one bump function and one FAF_DEFINE_RESERVE line.
  */
 
-#ifndef NPOOLS
-#define NPOOLS 12
+/* ---- Layer 1: backing memory ---- */
+
+#define STORAGE_SLOTS (FAF_NPOOLS * FAF_POOL_SLOTS)
+
+static faf_slot storage[STORAGE_SLOTS];
+
+static inline faf_slot *pool_base(uint16_t pool) {
+  return &storage[(size_t)pool * FAF_POOL_SLOTS];
+}
+
+bool faf_mem_contains(const void *p, size_t n) {
+  uintptr_t lo = (uintptr_t)storage;
+  uintptr_t hi = lo + sizeof(storage);
+  uintptr_t q = (uintptr_t)p;
+  return q >= lo && q <= hi && n <= hi - q;
+}
+
+/* ---- Layer 2: region lifetime ---- */
+
+typedef struct {
+  size_t cursor; // slots used
+  uint16_t gen;  // bumped on every release
+  bool in_use;
+} pool_state;
+
+static pool_state pools[FAF_NPOOLS];
+
+faf_region faf_region_acquire(void) {
+  for (uint16_t i = 0; i < FAF_NPOOLS; ++i) {
+    if (!pools[i].in_use) {
+      pools[i].in_use = true;
+      pools[i].cursor = 0;
+      return (faf_region){.pool = i, .gen = pools[i].gen};
+    }
+  }
+  return FAF_REGION_NONE;
+}
+
+bool faf_region_valid(faf_region r) {
+  return r.pool < FAF_NPOOLS && pools[r.pool].in_use &&
+         pools[r.pool].gen == r.gen;
+}
+
+void faf_region_release(faf_region r) {
+  if (!faf_region_valid(r))
+    return;
+#ifdef FAF_DEBUG
+  // poison, so reads through stale strings stand out
+  faf_memset(pool_base(r.pool), 0xDD, pools[r.pool].cursor * FAF_SLOT_BYTES);
 #endif
-
-
-// TODO: allow someone to allocate more then 1 pool
-// the following pools will have idx -1 to show them as unused.
-// when the pool is reset, look ahead for -1 values to reset all together
-
-faf_string mempools[NPOOLS * BLOCK_LEN];
-
-pool_t pool_idxs[NPOOLS];
-
-pool_t next_pool() {
-  static int current_pool = 0;
-
-  // look for first pool with its index at 0
-  for (int i = 0; i < NPOOLS; ++i) {
-    if (pool_idxs[current_pool]) {
-      current_pool = current_pool == NPOOLS - 1 ? 0 : current_pool + 1;
-    } else {
-      break;
-    }
-  }
-  return current_pool;
+  pools[r.pool].gen++;
+  pools[r.pool].in_use = false;
 }
 
-void faf_string_pool_reset(pool_t pool) { pool_idxs[pool] = 0; }
-
-pool_t get_pool_offset(pool_t pool) { return pool_idxs[pool]; }
-
-pool_t get_pool_remaining(pool_t pool) {
-  return BLOCK_LEN - get_pool_offset(pool);
+size_t faf_region_used(faf_region r) {
+  return faf_region_valid(r) ? pools[r.pool].cursor : 0;
 }
 
-faf_string *faf_string_alloc(pool_t pool) {
-  int idx = pool_idxs[pool]++;
-  faf_string *alloc = &mempools[pool * BLOCK_LEN + idx];
-  return alloc;
+size_t faf_region_remaining(faf_region r) {
+  return faf_region_valid(r) ? FAF_POOL_SLOTS - pools[r.pool].cursor : 0;
 }
 
-faf_string *faf_string_copy(pool_t pool, faf_string str) {
-  faf_string *alloc = faf_string_alloc(pool);
+/* ---- Layer 3: allocation ---- */
 
-  const char *data = str.start;
-  alloc->start = (const char *)&mempools[pool * BLOCK_LEN + pool_idxs[pool]];
-  for (; data + 16 <= str.end; data += 16) {
-    simde__m128i chars = simde_mm_loadu_si128((const simde__m128 *)data);
-    int idx = pool_idxs[pool]++;
-    mempools[pool * BLOCK_LEN + idx].data = chars;
-  }
-  int remaining = str.end - data;
-  alloc->end =
-      (const char
-           *)(((uintptr_t)&mempools[pool * BLOCK_LEN + pool_idxs[pool]]) +
-              remaining);
-  if (remaining > 0) {
-    int idx = pool_idxs[pool]++;
-    char buffer[16] = {0};
-    for (int i = 0; i < remaining; ++i) {
-      buffer[i] = data[i];
-    }
-    simde__m128i chars = simde_mm_loadu_si128((const simde__m128 *)buffer);
-    mempools[pool * BLOCK_LEN + idx].data = chars;
+// Strategy: returns the old cursor, or SIZE_MAX if `n` more slots would
+// exceed `cap`. Checking inside the strategy means a failed reserve never
+// moves the cursor.
+typedef size_t (*bump_fn)(size_t *cursor, size_t n, size_t cap);
+
+static inline size_t bump_local(size_t *cursor, size_t n, size_t cap) {
+  size_t old = *cursor;
+  if (n > cap - old)
+    return SIZE_MAX;
+  *cursor = old + n;
+  return old;
+}
+
+// Core: shared logic and invariants. `bump` is a constant at every call site,
+// so with optimizations on this inlines down to a compare and an add.
+static inline faf_span reserve_core(faf_region r, size_t slots, bump_fn bump) {
+  if (!faf_region_valid(r))
+    return FAF_SPAN_NONE;
+  size_t off = bump(&pools[r.pool].cursor, slots, FAF_POOL_SLOTS);
+  if (off == SIZE_MAX)
+    return FAF_SPAN_NONE;
+  return (faf_span){.ptr = pool_base(r.pool) + off, .slots = slots};
+}
+
+// Stamps out a named reserve function for a bump strategy.
+#define FAF_DEFINE_RESERVE(name, bump)                                         \
+  faf_span name(faf_region r, size_t slots) {                                  \
+    return reserve_core(r, slots, bump);                                       \
   }
 
-  return alloc;
+FAF_DEFINE_RESERVE(faf_reserve, bump_local)
+
+bool faf_reserve_extend(faf_region r, faf_span *sp, size_t more) {
+  if (!faf_region_valid(r) || !sp->ptr)
+    return false;
+  pool_state *ps = &pools[r.pool];
+  // only the most recent reservation can grow, and only into free space
+  if (sp->ptr + sp->slots != pool_base(r.pool) + ps->cursor)
+    return false;
+  if (bump_local(&ps->cursor, more, FAF_POOL_SLOTS) == SIZE_MAX)
+    return false;
+  sp->slots += more;
+  return true;
+}
+
+void faf_reserve_shrink(faf_region r, faf_span *sp, size_t slots) {
+  if (!faf_region_valid(r) || !sp->ptr || slots >= sp->slots)
+    return;
+  pool_state *ps = &pools[r.pool];
+  if (sp->ptr + sp->slots == pool_base(r.pool) + ps->cursor)
+    ps->cursor -= sp->slots - slots; // most recent: give the tail back
+  sp->slots = slots;
+}
+
+/* ---- Copy ---- */
+
+faf_string faf_string_copy(faf_region r, faf_string str) {
+  size_t len = faf_string_len(str);
+  faf_span sp = faf_reserve(r, faf_slots_for(len));
+  if (!sp.ptr)
+    return FAF_STRING_NONE;
+
+  char *dst = (char *)sp.ptr;
+  char *dst_end = dst + sp.slots * FAF_SLOT_BYTES;
+  faf_memcpy(dst, str.start, len);
+  // NUL terminate and zero pad the rest of the last slot
+  faf_memset(dst + len, 0, (size_t)(dst_end - (dst + len)));
+
+  return (faf_string){.start = dst, .end = dst + len};
 }

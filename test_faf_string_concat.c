@@ -8,25 +8,64 @@
 #include <string.h>
 
 const char *str1 = "hello,world";
-void test_str1() {
+void test_str1(void) {
   printf("Testing string 1...\n");
-  pool_t pool = next_pool();
+  faf_region r = faf_region_acquire();
   faf_string str = faf_string_init(str1);
 
-  faf_string *str_concat = faf_string_concat(pool, str, str);
+  faf_string str_concat = faf_string_concat(r, str, str);
+  printf("%.*s\n", (int)faf_string_len(str_concat), str_concat.start);
 
-  int len = str_concat->end - str_concat->start;
-  printf("%.*s\n", (int)(str_concat->end - str_concat->start), str_concat->start);
-  
-  // Note: The current implementation of faf_string_concat only copies the first string
-  // as noted by the TODOs in the code. When fully implemented, this should be 22.
-  int expected = 11;
-  ASSERT_INT_EQ(expected, len, "Array length incorrect");
+  ASSERT_INT_EQ(22, (int)faf_string_len(str_concat), "Concat length incorrect");
+  ASSERT_STR_EQ("hello,worldhello,world", str_concat.start,
+                "Concat contents incorrect");
+  faf_region_release(r);
+}
+
+void test_lengths(void) {
+  // every split of lengths around the 16 byte boundaries, from both caller
+  // memory and pool storage
+  const char *src = "0123456789abcdefghijklmnopqrstuvwxyzABCDEF";
+  char expected[128];
+  faf_region r = faf_region_acquire();
+  for (size_t la = 0; la <= 33; ++la) {
+    for (size_t lb = 0; lb <= 33; ++lb) {
+      faf_string a = faf_string_init_n(src, la);
+      faf_string b = faf_string_init_n(src + 5, lb);
+      memcpy(expected, a.start, la);
+      memcpy(expected + la, b.start, lb);
+      expected[la + lb] = '\0';
+
+      faf_string c1 = faf_string_concat(r, a, b);
+      ASSERT_STR_EQ(expected, c1.start, "Concat from caller memory incorrect");
+
+      faf_string c2 = faf_string_concat(r, faf_string_copy(r, a),
+                                        faf_string_copy(r, b));
+      ASSERT_STR_EQ(expected, c2.start, "Concat from pool storage incorrect");
+      ASSERT_INT_EQ((int)(la + lb), (int)faf_string_len(c2),
+                    "Concat length incorrect");
+    }
+    // plenty of room per round, but don't run out
+    faf_region_release(r);
+    r = faf_region_acquire();
+  }
+  faf_region_release(r);
+}
+
+void test_out_of_space(void) {
+  faf_region r = faf_region_acquire();
+  faf_reserve(r, FAF_POOL_SLOTS - 1);
+  faf_string a = faf_string_init("0123456789");
+  ASSERT_TRUE(faf_string_is_none(faf_string_concat(r, a, a)),
+              "Concat into a full region succeeded");
+  faf_region_release(r);
 }
 
 // Test case definitions
 test_case_t string_concat_tests[] = {
-    {"basic_concat", test_str1}
+    {"basic_concat", test_str1},
+    {"lengths", test_lengths},
+    {"out_of_space", test_out_of_space},
 };
 
 // Setup and teardown functions

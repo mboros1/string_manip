@@ -8,15 +8,18 @@ endif
 
 # Define the compiler and options with defaults that can be overridden
 CC ?= gcc
-SIMDE_INCLUDE ?= 
-# Only keep the essential flags in the default
-CFLAGS ?= -O0 -flax-vector-conversions -g
-TEST_FLAGS ?= -O0 -flax-vector-conversions -g
+SIMDE_INCLUDE ?=
+CFLAGS ?= -O0 -g
+TEST_FLAGS ?= -O0 -g
+# Appended to every library/test compile and link, e.g.
+#   EXTRA_FLAGS=-DFAF_BACKEND_REF      force the scalar backend
+#   EXTRA_FLAGS="-arch x86_64"         SSE2 backend on Apple Silicon (Rosetta)
+EXTRA_FLAGS ?=
 
-# If SIMDE_INCLUDE is set, add it to the flags
+# simde is only used by the standalone experiment utilities, not the library
+UTIL_FLAGS = $(CFLAGS) -flax-vector-conversions
 ifneq ($(SIMDE_INCLUDE),)
-  CFLAGS += -I$(SIMDE_INCLUDE)
-  TEST_FLAGS += -I$(SIMDE_INCLUDE)
+  UTIL_FLAGS += -I$(SIMDE_INCLUDE)
 endif
 
 # Directories
@@ -24,91 +27,84 @@ SRC_DIR = .
 OBJ_DIR = obj
 BIN_DIR = bin
 
-# Create necessary directories
-$(BIN_DIR):
-	mkdir -p $(BIN_DIR)
-
-$(OBJ_DIR):
-	mkdir -p $(OBJ_DIR)
-
-# Source files
-SRC_FILES = $(wildcard $(SRC_DIR)/*.c)
-
-# Object files
-OBJS = $(patsubst $(SRC_DIR)/%.c,$(OBJ_DIR)/%.o,$(SRC_FILES))
+# Library
+LIB_SRCS = faf_kernels_ref.c faf_kernels_simd.c faf_string.c \
+           faf_string_strlen.c faf_string_mem.c faf_string_cmp.c \
+           faf_string_concat.c faf_string_strsplit.c
+LIB_OBJS = $(patsubst %.c,$(OBJ_DIR)/%.o,$(LIB_SRCS))
+LIB = $(OBJ_DIR)/libfaf.a
 
 # Test files
 TEST_FILES = $(wildcard $(SRC_DIR)/test_*.c)
 TEST_TARGETS = $(patsubst $(SRC_DIR)/%.c,$(BIN_DIR)/%,$(TEST_FILES))
 
-# Utility targets
-UTIL_TARGETS = generate_random_strings str_split_test str_len_test
+# Utility targets (standalone experiments, need simde)
+UTIL_TARGETS = str_split_test str_len_test
 
 # Default target
-all: $(BIN_DIR) $(OBJ_DIR) $(UTIL_TARGETS) $(TEST_TARGETS)
+all: $(LIB) $(UTIL_TARGETS) generate_random_strings $(TEST_TARGETS)
 
-# Compile each utility target
-$(UTIL_TARGETS): %: $(OBJ_DIR)/%.o
-	$(CC) $(CFLAGS) -o $(BIN_DIR)/$@ $<
+$(BIN_DIR) $(OBJ_DIR):
+	mkdir -p $@
 
-# Compile object files
-$(OBJ_DIR)/%.o: $(SRC_DIR)/%.c
-	$(CC) $(CFLAGS) -c $< -o $@
+# Object files; -MMD -MP keeps header dependencies up to date
+$(OBJ_DIR)/%.o: $(SRC_DIR)/%.c | $(OBJ_DIR)
+	$(CC) $(CFLAGS) $(EXTRA_FLAGS) -MMD -MP -c $< -o $@
 
-# Build the test framework
-$(OBJ_DIR)/faf_test.o: $(SRC_DIR)/faf_test.c $(SRC_DIR)/faf_test.h
-	$(CC) $(TEST_FLAGS) -c $< -o $@
+$(OBJ_DIR)/test_%.o: $(SRC_DIR)/test_%.c | $(OBJ_DIR)
+	$(CC) $(TEST_FLAGS) $(EXTRA_FLAGS) -MMD -MP -c $< -o $@
+
+$(OBJ_DIR)/faf_test.o: $(SRC_DIR)/faf_test.c | $(OBJ_DIR)
+	$(CC) $(TEST_FLAGS) $(EXTRA_FLAGS) -MMD -MP -c $< -o $@
+
+$(LIB): $(LIB_OBJS)
+	$(AR) rcs $@ $^
+
+# Every test links its own object, the test framework and the library
+$(BIN_DIR)/test_%: $(OBJ_DIR)/test_%.o $(OBJ_DIR)/faf_test.o $(LIB) | $(BIN_DIR)
+	$(CC) $(TEST_FLAGS) $(EXTRA_FLAGS) $^ -o $@
+
+$(UTIL_TARGETS): %: $(SRC_DIR)/%.c | $(BIN_DIR)
+	$(CC) $(UTIL_FLAGS) $< -o $(BIN_DIR)/$@
+
+generate_random_strings: $(OBJ_DIR)/generate_random_strings.o $(LIB) | $(BIN_DIR)
+	$(CC) $(CFLAGS) $(EXTRA_FLAGS) $^ -o $(BIN_DIR)/$@
 
 # Test framework dependency
 test_framework: $(BIN_DIR) $(OBJ_DIR) $(OBJ_DIR)/faf_test.o
 
-# Common component builds
-$(OBJ_DIR)/faf_string.o: $(SRC_DIR)/faf_string.c $(SRC_DIR)/faf_string.h
-	$(CC) $(CFLAGS) -c $< -o $@
-
-$(OBJ_DIR)/faf_string_strlen.o: $(SRC_DIR)/faf_string_strlen.c $(SRC_DIR)/faf_string_strlen.h
-	$(CC) $(CFLAGS) -c $< -o $@
-
-$(OBJ_DIR)/faf_string_mem.o: $(SRC_DIR)/faf_string_mem.c $(SRC_DIR)/faf_string_mem.h
-	$(CC) $(CFLAGS) -c $< -o $@
-
-$(OBJ_DIR)/faf_string_cmp.o: $(SRC_DIR)/faf_string_cmp.c $(SRC_DIR)/faf_string_cmp.h
-	$(CC) $(CFLAGS) -c $< -o $@
-
-$(OBJ_DIR)/faf_string_strsplit.o: $(SRC_DIR)/faf_string_strsplit.c $(SRC_DIR)/faf_string_strsplit.h
-	$(CC) $(CFLAGS) -c $< -o $@
-
-$(OBJ_DIR)/faf_string_concat.o: $(SRC_DIR)/faf_string_concat.c $(SRC_DIR)/faf_string_concat.h
-	$(CC) $(CFLAGS) -c $< -o $@
-
-# Individual test build rules
-$(BIN_DIR)/test_faf_string: $(OBJ_DIR)/faf_string.o $(OBJ_DIR)/test_faf_string.o $(OBJ_DIR)/faf_string_strlen.o $(OBJ_DIR)/faf_test.o
-	$(CC) $(TEST_FLAGS) $(OBJ_DIR)/faf_string.o $(OBJ_DIR)/test_faf_string.o $(OBJ_DIR)/faf_string_strlen.o $(OBJ_DIR)/faf_test.o -o $@
-
-$(BIN_DIR)/test_faf_string_mem: $(OBJ_DIR)/faf_string.o $(OBJ_DIR)/faf_string_strlen.o $(OBJ_DIR)/faf_string_mem.o $(OBJ_DIR)/test_faf_string_mem.o $(OBJ_DIR)/faf_test.o
-	$(CC) $(TEST_FLAGS) $(OBJ_DIR)/faf_string.o $(OBJ_DIR)/test_faf_string_mem.o $(OBJ_DIR)/faf_string_mem.o $(OBJ_DIR)/faf_string_strlen.o $(OBJ_DIR)/faf_test.o -o $@ -g
-
-$(BIN_DIR)/test_faf_string_strsplit: $(OBJ_DIR)/faf_string.o $(OBJ_DIR)/faf_string_strlen.o $(OBJ_DIR)/faf_string_mem.o $(OBJ_DIR)/test_faf_string_strsplit.o $(OBJ_DIR)/faf_string_strsplit.o $(OBJ_DIR)/faf_test.o
-	$(CC) $(TEST_FLAGS) $(OBJ_DIR)/faf_string.o $(OBJ_DIR)/test_faf_string_strsplit.o $(OBJ_DIR)/faf_string_mem.o $(OBJ_DIR)/faf_string_strlen.o $(OBJ_DIR)/faf_string_strsplit.o $(OBJ_DIR)/faf_test.o -o $@ -g
-
-$(BIN_DIR)/test_faf_string_cmp: $(OBJ_DIR)/faf_string.o $(OBJ_DIR)/faf_string_strlen.o $(OBJ_DIR)/faf_string_mem.o $(OBJ_DIR)/test_faf_string_cmp.o $(OBJ_DIR)/faf_string_cmp.o $(OBJ_DIR)/faf_test.o
-	$(CC) $(TEST_FLAGS) $(OBJ_DIR)/faf_string.o $(OBJ_DIR)/test_faf_string_cmp.o $(OBJ_DIR)/faf_string_mem.o $(OBJ_DIR)/faf_string_strlen.o $(OBJ_DIR)/faf_string_cmp.o $(OBJ_DIR)/faf_test.o -o $@ -g
-
-$(BIN_DIR)/test_faf_string_concat: $(OBJ_DIR)/faf_string.o $(OBJ_DIR)/faf_string_strlen.o $(OBJ_DIR)/faf_string_mem.o $(OBJ_DIR)/test_faf_string_concat.o $(OBJ_DIR)/faf_string_concat.o $(OBJ_DIR)/faf_test.o
-	$(CC) $(TEST_FLAGS) $(OBJ_DIR)/faf_string.o $(OBJ_DIR)/test_faf_string_concat.o $(OBJ_DIR)/faf_string_mem.o $(OBJ_DIR)/faf_string_strlen.o $(OBJ_DIR)/faf_string_concat.o $(OBJ_DIR)/faf_test.o -o $@ -g
-
-# Target to run all tests using the framework
+# Build and run all tests; fails if any test fails
 all_tests: test_framework $(TEST_TARGETS)
 	@echo "All tests built with framework support"
 	@for test in $(TEST_TARGETS); do \
 		echo "Running $$test..."; \
-		$$test; \
+		$$test || exit 1; \
 	done
+
+test: all_tests
 
 # Target for individual test runs
 test_%: $(BIN_DIR)/test_%
 	@echo "Running $@..."
 	@$(BIN_DIR)/$@
+
+# Run the tests again on the scalar reference backend
+check_backends:
+	$(MAKE) OBJ_DIR=$(OBJ_DIR)/ref BIN_DIR=$(BIN_DIR)/ref \
+		EXTRA_FLAGS="$(EXTRA_FLAGS) -DFAF_BACKEND_REF" all_tests
+
+# The optimized library must not import libc's memory/string functions
+FREESTANDING_DIR = $(OBJ_DIR)/freestanding
+check_freestanding:
+	@mkdir -p $(FREESTANDING_DIR)
+	@for f in $(LIB_SRCS); do \
+		$(CC) -O2 $(EXTRA_FLAGS) -c $$f -o $(FREESTANDING_DIR)/$${f%.c}.o || exit 1; \
+	done
+	@if nm -u $(FREESTANDING_DIR)/*.o | awk '{print $$NF}' | \
+		grep -E '^_?(memcpy|memset|memmove|memcmp|bzero|strlen)$$'; then \
+		echo "library imports the libc functions above"; exit 1; \
+	fi
+	@echo "OK: library imports no libc memory/string functions"
 
 # Add targets for test explorer
 test_explorer: $(BIN_DIR) $(OBJ_DIR) $(TEST_TARGETS)
@@ -117,13 +113,16 @@ test_explorer: $(BIN_DIR) $(OBJ_DIR) $(TEST_TARGETS)
 # Show configuration
 config:
 	@echo "Current configuration:"
-	@echo "CC        = $(CC)"
-	@echo "CFLAGS    = $(CFLAGS)"
-	@echo "TEST_FLAGS = $(TEST_FLAGS)"
+	@echo "CC          = $(CC)"
+	@echo "CFLAGS      = $(CFLAGS)"
+	@echo "TEST_FLAGS  = $(TEST_FLAGS)"
+	@echo "EXTRA_FLAGS = $(EXTRA_FLAGS)"
 
 # Clean up
 clean:
 	rm -rf $(OBJ_DIR) $(BIN_DIR)
 
-.PHONY: all clean all_tests test_framework test_explorer config
+-include $(wildcard $(OBJ_DIR)/*.d)
 
+.PHONY: all clean all_tests test test_framework test_explorer config \
+        check_backends check_freestanding generate_random_strings $(UTIL_TARGETS)
