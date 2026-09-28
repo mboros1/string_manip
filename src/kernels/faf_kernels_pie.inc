@@ -225,27 +225,26 @@ __asm__(
     ".size faf_k_find_byte, .-faf_k_find_byte\n"
     ".popsection\n");
 
-// strlen in assembly, like find_byte but leaner: no length to track and no
-// pattern to XOR. SWAR to the first 64-byte boundary at least 64 bytes in,
-// then PIE chunks until one holds the NUL (reading at most to the end of that
-// aligned chunk, never across a page), then SWAR over that chunk.
+// strlen in assembly. The word loops test each byte with its own BNONE (branch
+// if word & mask == 0), like newlib's Xtensa strlen in the ROM: 6 instructions
+// per word, and the branch taken says which byte, where a SWAR zero-lane mask
+// costs ~7 per word plus ~8 to turn the mask into a position. Words to the
+// first 64-byte boundary at least 128 bytes in (with 64, a third of 85-byte
+// lines paid for a chunk and a rescan: 7% slower), then PIE chunks until one
+// holds the NUL (reading at most to the end of that aligned chunk, never
+// across a page), then words over that chunk.
 //
-// Registers: a2 s, a5 cursor, a6 first chunk, a10 0x7f7f7f7f, a11 -1,
-// a8/a9/a13-a15 temporaries.
-#define FAF_STRLEN_PAIR(hit0, hit1)                                            \
-  "  l32i    a8, a5, 0\n"                                                      \
-  "  l32i    a9, a5, 4\n"                                                      \
-  "  and     a14, a8, a10\n"                                                   \
-  "  and     a15, a9, a10\n"                                                   \
-  "  add     a14, a14, a10\n"                                                  \
-  "  add     a15, a15, a10\n"                                                  \
-  "  or      a14, a14, a8\n"                                                   \
-  "  or      a15, a15, a9\n"                                                   \
-  "  or      a14, a14, a10\n"                                                  \
-  "  or      a15, a15, a10\n"                                                  \
-  "  bnall   a14, a11, " hit0 "\n"                                             \
-  "  bnall   a15, a11, " hit1 "\n"                                             \
-  "  addi    a5, a5, 8\n"
+// Registers: a2 s, a3 cursor, a4-a7 the byte masks 0xff << 8k, a11 loop
+// count, a12 first chunk, a8-a10/a13 temporaries.
+#define FAF_STRLEN_WORDS(end)                                                  \
+  "  loop    a11, " end "\n"                                                   \
+  "  l32i    a8, a3, 0\n"                                                      \
+  "  addi    a3, a3, 4\n" /* between the load and its use: no stall */          \
+  "  bnone   a8, a4, .Lsl_w0\n"                                                \
+  "  bnone   a8, a5, .Lsl_w1\n"                                                \
+  "  bnone   a8, a6, .Lsl_w2\n"                                                \
+  "  bnone   a8, a7, .Lsl_w3\n"                                                \
+  end ":\n"
 __asm__(
     ".pushsection .text.faf_k_strlen,\"ax\",@progbits\n"
     ".align 4\n"
@@ -253,43 +252,33 @@ __asm__(
     ".type faf_k_strlen,@function\n"
     "faf_k_strlen:\n"
     "  entry   a1, 32\n"
-    "  mov     a5, a2\n"
+    "  mov     a3, a2\n"
     ".Lsl_bytes:\n"
-    "  extui   a8, a5, 0, 2\n"
+    "  extui   a8, a3, 0, 2\n"
     "  beqz    a8, .Lsl_aligned\n"
-    "  l8ui    a9, a5, 0\n"
+    "  l8ui    a9, a3, 0\n"
     "  beqz    a9, .Lsl_found\n"
-    "  addi    a5, a5, 1\n"
+    "  addi    a3, a3, 1\n"
     "  j       .Lsl_bytes\n"
     ".Lsl_aligned:\n"
-    "  movi    a10, 0x7f7f7f7f\n"
-    "  movi    a11, -1\n"
-    "  addi    a6, a2, 64\n"
-    "  neg     a8, a6\n"
+    "  movi    a4, 0xff\n"
+    "  movi    a5, 0xff00\n"
+    "  movi    a6, 0xff0000\n"
+    "  movi    a7, 0xff000000\n"
+    "  addi    a12, a2, 128\n"
+    "  neg     a8, a12\n"
     "  extui   a8, a8, 0, 6\n"
-    "  add     a6, a6, a8\n"            // first chunk
-    "  sub     a8, a6, a5\n"            // at least 64, a multiple of 4
-    "  bbci    a8, 2, .Lsl_pairs\n"     // an odd number of words: one first
-    "  l32i    a8, a5, 0\n"
-    "  and     a14, a8, a10\n"
-    "  add     a14, a14, a10\n"
-    "  or      a14, a14, a8\n"
-    "  or      a14, a14, a10\n"
-    "  bnall   a14, a11, .Lsl_hit0\n"
-    "  addi    a5, a5, 4\n"
-    "  sub     a8, a6, a5\n"
-    ".Lsl_pairs:\n"
-    "  srli    a13, a8, 3\n"
-    "  loop    a13, .Lsl_pairs_end\n"
-    FAF_STRLEN_PAIR(".Lsl_hit0", ".Lsl_hit1")
-    ".Lsl_pairs_end:\n"
+    "  add     a12, a12, a8\n"          // first chunk
+    "  sub     a11, a12, a3\n"
+    "  srli    a11, a11, 2\n"           // words to it, at least 32
+    FAF_STRLEN_WORDS(".Lsl_lead_end")
     "  ee.zero.q q7\n"
-    "  movi    a13, -1\n"               // until the NUL
-    "  loop    a13, .Lsl_chunks_end\n"
-    "  ee.vld.128.ip q0, a5, 16\n"
-    "  ee.vld.128.ip q1, a5, 16\n"
-    "  ee.vld.128.ip q2, a5, 16\n"
-    "  ee.vld.128.ip q3, a5, 16\n"
+    "  movi    a11, 0\n"                // 2^32 chunks: until the NUL
+    "  loop    a11, .Lsl_chunks_end\n"
+    "  ee.vld.128.ip q0, a3, 16\n"
+    "  ee.vld.128.ip q1, a3, 16\n"
+    "  ee.vld.128.ip q2, a3, 16\n"
+    "  ee.vld.128.ip q3, a3, 16\n"
     "  ee.vcmp.eq.s8 q0, q0, q7\n"
     "  ee.vcmp.eq.s8 q1, q1, q7\n"
     "  ee.vcmp.eq.s8 q2, q2, q7\n"
@@ -299,37 +288,31 @@ __asm__(
     "  ee.orq  q0, q0, q2\n"
     "  ee.movi.32.a q0, a8, 0\n"
     "  ee.movi.32.a q0, a9, 1\n"
-    "  ee.movi.32.a q0, a14, 2\n"
-    "  ee.movi.32.a q0, a15, 3\n"
+    "  ee.movi.32.a q0, a10, 2\n"
+    "  ee.movi.32.a q0, a13, 3\n"
     "  or      a8, a8, a9\n"
-    "  or      a14, a14, a15\n"
-    "  or      a8, a8, a14\n"
+    "  or      a10, a10, a13\n"
+    "  or      a8, a8, a10\n"
     "  bnez    a8, .Lsl_chunk_hit\n"
     ".Lsl_chunks_end:\n"
     ".Lsl_chunk_hit:\n"
-    "  addi    a5, a5, -64\n"
-    "  movi    a13, 8\n"
-    "  loop    a13, .Lsl_rescan_end\n"
-    FAF_STRLEN_PAIR(".Lsl_hit0", ".Lsl_hit1")
-    ".Lsl_rescan_end:\n"
-    ".Lsl_hit1:\n"
-    "  addi    a5, a5, 4\n"
-    "  mov     a14, a15\n"
-    ".Lsl_hit0:\n"                      // a14: ~mask, 0x80 in NUL lanes
-    "  xor     a14, a14, a11\n"
-    "  neg     a8, a14\n"
-    "  and     a8, a8, a14\n"
-    "  nsau    a8, a8\n"
-    "  movi    a9, 31\n"
-    "  sub     a8, a9, a8\n"
-    "  srli    a8, a8, 3\n"
-    "  add     a5, a5, a8\n"
+    "  addi    a3, a3, -64\n"
+    "  movi    a11, 16\n"
+    FAF_STRLEN_WORDS(".Lsl_rescan_end") // finds the NUL
+    ".Lsl_w0:\n"                        // byte k of the word before a3
+    "  addi    a3, a3, -1\n"
+    ".Lsl_w1:\n"
+    "  addi    a3, a3, -1\n"
+    ".Lsl_w2:\n"
+    "  addi    a3, a3, -1\n"
+    ".Lsl_w3:\n"
+    "  addi    a3, a3, -1\n"
     ".Lsl_found:\n"
-    "  sub     a2, a5, a2\n"
+    "  sub     a2, a3, a2\n"
     "  retw\n"
     ".size faf_k_strlen, .-faf_k_strlen\n"
     ".popsection\n");
-#undef FAF_STRLEN_PAIR
+#undef FAF_STRLEN_WORDS
 
 // Sum of the bytes of w, each at most 126
 static inline size_t byte_sum(uint32_t w) {
