@@ -285,6 +285,14 @@ void bench_kernels(void) {
   PIE_SWAR(LINES_BENCH, faf_swar_mismatch(s, line_copies[i], n));
   LINES_BENCH("ref", faf_ref_mismatch(s, line_copies[i], n));
   LINES_BENCH("libc memcmp", memcmp(s, line_copies[i], n) != 0);
+  group_begin("count_byte ','", NS_PER_OP);
+  LINES_BENCH(FAF_BACKEND_NAME, faf_k_count_byte(s, n, ','));
+  PIE_SWAR(LINES_BENCH, faf_swar_count_byte(s, n, ','));
+  LINES_BENCH("ref", faf_ref_count_byte(s, n, ','));
+  group_begin("ascii_prefix (all ascii)", NS_PER_OP);
+  LINES_BENCH(FAF_BACKEND_NAME, faf_k_ascii_prefix(s, n));
+  PIE_SWAR(LINES_BENCH, faf_swar_ascii_prefix(s, n));
+  LINES_BENCH("ref", faf_ref_ascii_prefix(s, n));
 
   section("Kernel throughput", "64 KB buffer, higher is better");
   group_begin("find_byte (absent)", GB_PER_S);
