@@ -81,6 +81,8 @@ def main():
                         help="chip, e.g. esp32, esp32s3, esp32c3 (default: esp32)")
     parser.add_argument("--timeout", type=float, default=300,
                         help="seconds to wait for the tests to finish")
+    parser.add_argument("--groups", default="",
+                        help="bench only: space-separated groups (default: all)")
     parser.add_argument("--no-flash", action="store_true",
                         help="run what is already on the board")
     args = parser.parse_args()
@@ -94,6 +96,7 @@ def main():
         cmd = ["idf.py", "-C", APPS[args.app], "-B", build_dir,
                f"-DIDF_TARGET={args.target}",
                f"-DSDKCONFIG={os.path.join(build_dir, 'sdkconfig')}",
+               f"-DFAF_BENCH_GROUPS={args.groups}",
                "-p", port, "build", "flash"]
         print("→", " ".join(cmd), flush=True)
         if subprocess.call(cmd) != 0:

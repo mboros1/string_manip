@@ -6,9 +6,14 @@
 //
 // Every kernel works the same way: bytes one at a time until the address is
 // word aligned, then aligned words, then the last bytes one at a time. Only
-// faf_k_strlen reads past the range (to the end of the word holding the
-// NUL), and an aligned word never crosses a page, so that is safe on any
-// memory. Aligned loads also suit CPUs that fault on unaligned ones (ESP32).
+// faf_k_strlen reads past the range (to the end of the aligned word pair
+// holding the NUL), and an aligned pair never crosses a page, so that is safe
+// on any memory. Aligned loads also suit CPUs that fault on unaligned ones
+// (ESP32).
+//
+// The word loops run a precomputed number of times, two words per trip where
+// that saves a branch: on in-order cores (ESP32) taken branches dominate, and
+// a counted loop lets GCC use hardware loops (Xtensa LOOP).
 
 #if defined(FAF_BACKEND_SWAR)
 
@@ -23,6 +28,10 @@ typedef uintptr_t __attribute__((may_alias)) word_alias;
 
 static inline bool aligned(const void *p) {
   return ((uintptr_t)p & (W - 1)) == 0;
+}
+
+static inline bool pair_aligned(const void *p) {
+  return ((uintptr_t)p & (2 * W - 1)) == 0;
 }
 
 // `p` must be word aligned
@@ -85,14 +94,14 @@ static inline size_t count_lanes(word m) {
 FAF_NO_ASAN FAF_NO_BUILTIN
 size_t faf_k_strlen(const char *s) {
   const char *p = s;
-  for (; !aligned(p); ++p) {
+  for (; !pair_aligned(p); ++p) {
     if (*p == '\0')
       return (size_t)(p - s);
   }
-  for (;; p += W) {
-    word m = zero_lanes(load(p));
-    if (m)
-      return (size_t)(p - s) + first_lane(m);
+  for (;; p += 2 * W) {
+    word m0 = zero_lanes(load(p)), m1 = zero_lanes(load(p + W));
+    if (m0 | m1)
+      return (size_t)(p - s) + (m0 ? first_lane(m0) : W + first_lane(m1));
   }
 }
 
@@ -104,10 +113,17 @@ size_t faf_k_find_byte(const char *s, size_t n, char c) {
       return i;
   }
   word pat = bcast((unsigned char)c);
-  for (; i + W <= n; i += W) {
+  for (size_t pairs = (n - i) / (2 * W); pairs; --pairs, i += 2 * W) {
+    word m0 = zero_lanes(load(s + i) ^ pat);
+    word m1 = zero_lanes(load(s + i + W) ^ pat);
+    if (m0 | m1)
+      return i + (m0 ? first_lane(m0) : W + first_lane(m1));
+  }
+  if (i + W <= n) {
     word m = zero_lanes(load(s + i) ^ pat);
     if (m)
       return i + first_lane(m);
+    i += W;
   }
   for (; i < n; ++i) {
     if (s[i] == c)
@@ -124,10 +140,17 @@ size_t faf_k_rfind_byte(const char *s, size_t n, char c) {
       return i - 1;
   }
   word pat = bcast((unsigned char)c);
-  for (; i >= W; i -= W) {
+  for (size_t pairs = i / (2 * W); pairs; --pairs, i -= 2 * W) {
+    word m1 = zero_lanes(load(s + i - W) ^ pat);
+    word m0 = zero_lanes(load(s + i - 2 * W) ^ pat);
+    if (m0 | m1)
+      return m1 ? i - W + last_lane(m1) : i - 2 * W + last_lane(m0);
+  }
+  if (i >= W) {
     word m = zero_lanes(load(s + i - W) ^ pat);
     if (m)
       return i - W + last_lane(m);
+    i -= W;
   }
   for (; i > 0; --i) {
     if (s[i - 1] == c)
@@ -142,7 +165,7 @@ size_t faf_k_count_byte(const char *s, size_t n, char c) {
   for (; i < n && !aligned(s + i); ++i)
     count += s[i] == c;
   word pat = bcast((unsigned char)c);
-  for (; i + W <= n; i += W)
+  for (size_t words = (n - i) / W; words; --words, i += W)
     count += count_lanes(zero_lanes(load(s + i) ^ pat));
   for (; i < n; ++i)
     count += s[i] == c;
@@ -160,7 +183,7 @@ size_t faf_k_find_bytes(const char *s, size_t n, char c, size_t *pos,
       return k;
   }
   word pat = bcast((unsigned char)c);
-  for (; i + W <= n; i += W) {
+  for (size_t words = (n - i) / W; words; --words, i += W) {
     for (word m = zero_lanes(load(s + i) ^ pat); m; m &= m - 1) {
       pos[k++] = i + first_lane(m);
       if (k == max)
@@ -180,12 +203,38 @@ size_t faf_k_find_bytes(const char *s, size_t n, char c, size_t *pos,
 // member; larger ones go through the bitmap a byte at a time (ref).
 #define SET_WORD_MAX 4
 
-// 0x80 in every lane whose membership in `set` equals `in`
-static inline word set_lanes(word x, const word *pats, int npats, bool in) {
-  word m = 0;
-  for (int j = 0; j < npats; ++j)
-    m |= zero_lanes(x ^ pats[j]);
-  return in ? m : ~m & HIGHS;
+// 0x80 in every lane whose membership in the set of `np` bytes equals `in`.
+// A lane is in the set unless it differs from every member.
+__attribute__((always_inline)) static inline word
+set_lanes(word x, const word *pats, int np, bool in) {
+  word out = HIGHS;
+  for (int j = 0; j < np; ++j) // np is a constant after inlining: unrolled
+    out &= nonzero_lanes(x ^ pats[j]);
+  return in ? ~out & HIGHS : out;
+}
+
+// The word loops of find_set/rfind_set for a set of exactly `np` bytes;
+// always inlined with a constant np, so the member loop unrolls
+__attribute__((always_inline)) static inline size_t
+find_set_words(const char *s, size_t *i, size_t n, const word *pats, int np,
+               bool in) {
+  for (size_t words = (n - *i) / W; words; --words, *i += W) {
+    word m = set_lanes(load(s + *i), pats, np, in);
+    if (m)
+      return *i + first_lane(m);
+  }
+  return n;
+}
+
+__attribute__((always_inline)) static inline size_t
+rfind_set_words(const char *s, size_t *i, const word *pats, int np, bool in,
+                size_t n) {
+  for (size_t words = *i / W; words; --words, *i -= W) {
+    word m = set_lanes(load(s + *i - W), pats, np, in);
+    if (m)
+      return *i - W + last_lane(m);
+  }
+  return n;
 }
 
 static int set_patterns(const faf_byteset *set, word pats[SET_WORD_MAX]) {
@@ -208,11 +257,16 @@ size_t faf_k_find_set(const char *s, size_t n, const faf_byteset *set,
     if (faf_byteset_has(set, (unsigned char)s[i]) == in)
       return i;
   }
-  for (; i + W <= n; i += W) {
-    word m = set_lanes(load(s + i), pats, npats, in);
-    if (m)
-      return i + first_lane(m);
+  size_t r;
+  switch (npats) {
+  case 0: r = find_set_words(s, &i, n, pats, 0, in); break;
+  case 1: r = find_set_words(s, &i, n, pats, 1, in); break;
+  case 2: r = find_set_words(s, &i, n, pats, 2, in); break;
+  case 3: r = find_set_words(s, &i, n, pats, 3, in); break;
+  default: r = find_set_words(s, &i, n, pats, 4, in); break;
   }
+  if (r != n)
+    return r;
   for (; i < n; ++i) {
     if (faf_byteset_has(set, (unsigned char)s[i]) == in)
       return i;
@@ -232,11 +286,16 @@ size_t faf_k_rfind_set(const char *s, size_t n, const faf_byteset *set,
     if (faf_byteset_has(set, (unsigned char)s[i - 1]) == in)
       return i - 1;
   }
-  for (; i >= W; i -= W) {
-    word m = set_lanes(load(s + i - W), pats, npats, in);
-    if (m)
-      return i - W + last_lane(m);
+  size_t r;
+  switch (npats) {
+  case 0: r = rfind_set_words(s, &i, pats, 0, in, n); break;
+  case 1: r = rfind_set_words(s, &i, pats, 1, in, n); break;
+  case 2: r = rfind_set_words(s, &i, pats, 2, in, n); break;
+  case 3: r = rfind_set_words(s, &i, pats, 3, in, n); break;
+  default: r = rfind_set_words(s, &i, pats, 4, in, n); break;
   }
+  if (r != n)
+    return r;
   for (; i > 0; --i) {
     if (faf_byteset_has(set, (unsigned char)s[i - 1]) == in)
       return i - 1;
@@ -254,8 +313,10 @@ static inline unsigned char fold(unsigned char c) {
 // case-folded when `icase`. a is walked in aligned words; b generally has a
 // different alignment, so each of its words is shifted together from the two
 // aligned words it straddles. Every load holds at least one byte in range.
-static inline size_t mismatch(const char *a, const char *b, size_t n,
-                              bool icase) {
+// always_inline: each caller gets a copy with `icase` constant, so the loops
+// carry no test for it (and can become hardware loops)
+__attribute__((always_inline)) static inline size_t
+mismatch(const char *a, const char *b, size_t n, bool icase) {
   size_t i = 0;
   for (; i < n && !aligned(a + i); ++i) {
     unsigned char x = (unsigned char)a[i], y = (unsigned char)b[i];
@@ -264,7 +325,7 @@ static inline size_t mismatch(const char *a, const char *b, size_t n,
   }
   size_t off = (uintptr_t)(b + i) & (W - 1);
   if (off == 0) {
-    for (; i + W <= n; i += W) {
+    for (size_t words = (n - i) / W; words; --words, i += W) {
       word x = load(a + i), y = load(b + i);
       word d = icase ? to_case(x, false) ^ to_case(y, false) : x ^ y;
       if (d)
@@ -273,7 +334,7 @@ static inline size_t mismatch(const char *a, const char *b, size_t n,
   } else if (i + W <= n) {
     const char *bw = b + i - off; // aligned word holding b[i]
     word lo = load(bw);
-    for (; i + W <= n; i += W) {
+    for (size_t words = (n - i) / W; words; --words, i += W) {
       bw += W;
       word hi = load(bw);
       word y = (lo >> (8 * off)) | (hi << (8 * (W - off)));
@@ -312,11 +373,12 @@ void faf_k_ascii_case(char *dst, const char *src, size_t n, bool upper) {
     unsigned char c = (unsigned char)src[i];
     dst[i] = (char)(c >= lo && c <= hi ? c ^ 0x20 : c);
   }
+  size_t words = (n - i) / W;
   if (aligned(dst + i)) {
-    for (; i + W <= n; i += W)
+    for (; words; --words, i += W)
       *(word_alias *)(void *)(dst + i) = to_case(load(src + i), upper);
   } else {
-    for (; i + W <= n; i += W) {
+    for (; words; --words, i += W) {
       word x = to_case(load(src + i), upper);
       __builtin_memcpy(dst + i, &x, W); // unaligned store
     }
@@ -334,7 +396,7 @@ size_t faf_k_ascii_prefix(const char *s, size_t n) {
     if ((unsigned char)s[i] >= 0x80)
       return i;
   }
-  for (; i + W <= n; i += W) {
+  for (size_t words = (n - i) / W; words; --words, i += W) {
     word m = load(s + i) & HIGHS;
     if (m)
       return i + first_lane(m);

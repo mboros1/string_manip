@@ -146,7 +146,7 @@ esp32_test:
 	@$(ESP32_RUN) --app=tests
 
 esp32_bench:
-	@$(ESP32_RUN) --app=bench
+	@$(ESP32_RUN) --app=bench --groups="$(BENCH_GROUPS)"
 
 # Built freestanding, the library may import only memcpy, memset, memmove and
 # memcmp, which GCC and Clang require from every environment, plus the

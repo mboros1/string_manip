@@ -17,3 +17,9 @@ set_source_files_properties(${ROOT}/bench/bench_faf_string.c
 target_compile_definitions(${COMPONENT_LIB} PRIVATE
                            FAF_NPOOLS=4 FAF_POOL_SLOTS=4096
                            NLINES=400 BENCH_BIG=8192)
+
+# Only some groups: idf.py -DFAF_BENCH_GROUPS="kernels" (tools/esp32_run.py)
+if(DEFINED FAF_BENCH_GROUPS)
+  target_compile_definitions(${COMPONENT_LIB} PRIVATE
+                             FAF_BENCH_GROUPS="${FAF_BENCH_GROUPS}")
+endif()
