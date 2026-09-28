@@ -15,12 +15,15 @@ static bool builder_room(faf_builder *b, size_t add) {
   size_t need = faf_slots_for(b->len + add);
   if (need <= b->sp.slots)
     return true;
+  // grow geometrically, in place or not, so appends stay amortized O(1);
+  // finish gives the unused tail back
+  size_t grow = 2 * b->sp.slots > need ? 2 * b->sp.slots : need;
   if (!b->sp.ptr) {
     b->sp = faf_reserve(b->r, need);
-  } else if (!faf_reserve_extend(b->r, &b->sp, need - b->sp.slots)) {
-    // something else was allocated after us: move, and grow geometrically
-    // so repeated moves stay amortized O(1)
-    size_t grow = 2 * b->sp.slots > need ? 2 * b->sp.slots : need;
+  } else if (!faf_reserve_extend(b->r, &b->sp, grow - b->sp.slots) &&
+             !faf_reserve_extend(b->r, &b->sp, need - b->sp.slots)) {
+    // can't grow in place, not even by just enough near the region's end:
+    // something else was allocated after us, so move
     faf_span moved = faf_reserve(b->r, grow);
     if (!moved.ptr)
       moved = faf_reserve(b->r, need);

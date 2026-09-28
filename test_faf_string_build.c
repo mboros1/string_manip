@@ -39,6 +39,28 @@ void test_builder_in_place(void) {
   faf_region_release(r);
 }
 
+// Near the end of the region doubling doesn't fit, but growing in place by
+// just enough still does.
+void test_builder_near_full(void) {
+  faf_region r = faf_region_acquire();
+  faf_reserve(r, FAF_POOL_SLOTS - 10); // leave 10 slots
+  faf_builder b = faf_builder_init(r);
+  char expected[160] = {0};
+  for (int i = 0; i < 9; ++i) { // 9 x 16 bytes, then 6: 150 bytes + NUL
+    faf_builder_append(&b, S("0123456789abcdef"));
+    strcat(expected, "0123456789abcdef");
+  }
+  faf_builder_append(&b, S("tail!!"));
+  strcat(expected, "tail!!");
+  const faf_slot *first = b.sp.ptr;
+  faf_string s = faf_builder_finish(&b);
+  ASSERT_STR_EQ(expected, s.start, "builder contents near a full region");
+  ASSERT_TRUE(terminated(s), "builder result not terminated");
+  ASSERT_TRUE((const faf_slot *)s.start == first, "builder moved near a full region");
+  ASSERT_INT_EQ(FAF_POOL_SLOTS, (int)faf_region_used(r), "region not filled exactly");
+  faf_region_release(r);
+}
+
 void test_builder_moves(void) {
   faf_region r = faf_region_acquire();
   faf_builder b = faf_builder_init(r);
@@ -164,6 +186,7 @@ void test_format(void) {
 // Test case definitions
 test_case_t build_tests[] = {
     {"builder_in_place", test_builder_in_place},
+    {"builder_near_full", test_builder_near_full},
     {"builder_moves", test_builder_moves},
     {"builder_numbers", test_builder_numbers},
     {"builder_out_of_space", test_builder_out_of_space},
