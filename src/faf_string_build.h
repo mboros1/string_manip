@@ -39,7 +39,9 @@ bool faf_builder_append_u64(faf_builder *b, uint64_t v);
 faf_string faf_builder_finish(faf_builder *b);
 
 // Appending is inline while it fits in the space already reserved; only
-// growing calls into the library (the _grow functions, not for direct use).
+// growing calls into the library. The _grow functions handle every case
+// out of line: code with many append sites (like faf_string_format) can call
+// them to stay small.
 bool faf_builder_append_grow(faf_builder *b, faf_string str);
 bool faf_builder_append_char_grow(faf_builder *b, char c);
 

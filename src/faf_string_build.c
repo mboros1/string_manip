@@ -226,6 +226,8 @@ faf_string faf_string_reverse(faf_region r, faf_string str) {
 
 /* ---- Format ---- */
 
+// The out-of-line appends: they handle the fast case too, and inlining the
+// append fast path at every call site here made the loop bigger and slower.
 faf_string faf_string_vformat(faf_region r, const char *fmt, va_list ap) {
   faf_builder b = faf_builder_init(r);
   const char *p = fmt;
@@ -234,7 +236,7 @@ faf_string faf_string_vformat(faf_region r, const char *fmt, va_list ap) {
     // literal run up to the next '%'
     size_t run = (size_t)(end - p);
     size_t pct = faf_k_find_byte(p, run, '%');
-    faf_builder_append(&b, faf_string_init_n(p, pct));
+    faf_builder_append_grow(&b, faf_string_init_n(p, pct));
     p += pct;
     if (p == end)
       break;
@@ -255,16 +257,16 @@ faf_string faf_string_vformat(faf_region r, const char *fmt, va_list ap) {
     char conv = *p ? *p++ : '\0';
     switch (conv) {
     case '%':
-      faf_builder_append_char(&b, '%');
+      faf_builder_append_char_grow(&b, '%');
       break;
     case 'c':
-      faf_builder_append_char(&b, (char)va_arg(ap, int));
+      faf_builder_append_char_grow(&b, (char)va_arg(ap, int));
       break;
     case 's':
-      faf_builder_append(&b, faf_string_init(va_arg(ap, const char *)));
+      faf_builder_append_grow(&b, faf_string_init(va_arg(ap, const char *)));
       break;
     case 'S':
-      faf_builder_append(&b, va_arg(ap, faf_string));
+      faf_builder_append_grow(&b, va_arg(ap, faf_string));
       break;
     case 'd':
     case 'i': {
