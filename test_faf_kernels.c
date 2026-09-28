@@ -240,17 +240,18 @@ void test_transforms(void) {
       faf_k_reverse(got + 16, s, len);
       CHECK_EQ(0, memcmp(want, got, sizeof(want)), "reverse", off, len);
 
+      // faf_memcpy/faf_memset handle short lengths inline
       memset(want, '#', sizeof(want));
       memset(got, '#', sizeof(got));
-      faf_ref_memcpy(want + 16 + off, s, len);
+      memcpy(want + 16 + off, s, len);
       faf_memcpy(got + 16 + off, s, len);
-      CHECK_EQ(0, memcmp(want, got, sizeof(want)), "memcpy", off, len);
+      CHECK_EQ(0, memcmp(want, got, sizeof(want)), "faf_memcpy", off, len);
 
       memset(want, '#', sizeof(want));
       memset(got, '#', sizeof(got));
-      faf_ref_memset(want + 16 + off, 0xA5, len);
+      memset(want + 16 + off, 0xA5, len);
       faf_memset(got + 16 + off, 0xA5, len);
-      CHECK_EQ(0, memcmp(want, got, sizeof(want)), "memset", off, len);
+      CHECK_EQ(0, memcmp(want, got, sizeof(want)), "faf_memset", off, len);
     }
   }
   ASSERT_INT_EQ(0, failures, "transform kernels differ from reference");

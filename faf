@@ -46,7 +46,7 @@ BENCH_GROUPS = [
 CHECKS = [
     ("all", "both checks below"),
     ("backends", "rerun all tests on the scalar backend"),
-    ("freestanding", "library imports no libc memory/string functions"),
+    ("freestanding", "library imports only memcpy/memset/memmove/memcmp"),
 ]
 
 # Which options each action takes

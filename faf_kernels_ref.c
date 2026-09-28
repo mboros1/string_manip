@@ -125,20 +125,3 @@ void faf_ref_reverse(char *dst, const char *src, size_t n) {
   for (size_t i = 0; i < n; ++i)
     dst[i] = src[n - 1 - i];
 }
-
-FAF_NO_BUILTIN
-void *faf_ref_memcpy(void *restrict dst, const void *restrict src, size_t n) {
-  unsigned char *d = dst;
-  const unsigned char *s = src;
-  while (n--)
-    *d++ = *s++;
-  return dst;
-}
-
-FAF_NO_BUILTIN
-void *faf_ref_memset(void *dst, int c, size_t n) {
-  unsigned char *d = dst;
-  while (n--)
-    *d++ = (unsigned char)c;
-  return dst;
-}

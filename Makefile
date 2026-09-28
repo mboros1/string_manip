@@ -107,18 +107,32 @@ check_backends:
 	$(MAKE) OBJ_DIR=$(OBJ_DIR)/ref BIN_DIR=$(BIN_DIR)/ref \
 		EXTRA_FLAGS="$(EXTRA_FLAGS) -DFAF_BACKEND_REF" all_tests
 
-# The optimized library must not import libc's memory/string functions
+# Built freestanding, the library may import only memcpy, memset, memmove and
+# memcmp, which GCC and Clang require from every environment. Apple targets
+# also lower memset(p, 0, n) to bzero (__bzero on x86_64), which every Apple
+# platform has.
 FREESTANDING_DIR = $(OBJ_DIR)/freestanding
+FREESTANDING_ALLOWED = memcpy memset memmove memcmp bzero __bzero
 check_freestanding:
 	@mkdir -p $(FREESTANDING_DIR)
 	@for f in $(LIB_SRCS); do \
-		$(CC) -O2 $(EXTRA_FLAGS) -c $$f -o $(FREESTANDING_DIR)/$${f%.c}.o || exit 1; \
+		$(CC) -O2 -ffreestanding -fno-stack-protector $(EXTRA_FLAGS) \
+			-c $$f -o $(FREESTANDING_DIR)/$${f%.c}.o || exit 1; \
 	done
-	@if nm -u $(FREESTANDING_DIR)/*.o | awk '{print $$NF}' | \
-		grep -E '^_?(memcpy|memset|memmove|memcmp|bzero|strlen)$$'; then \
-		echo "library imports the libc functions above"; exit 1; \
+	@nm -g --defined-only $(FREESTANDING_DIR)/*.o | awk 'NF == 3 {print $$3}' | \
+		sed 's/^_//' | sort -u > $(FREESTANDING_DIR)/defined.txt
+	@nm -u $(FREESTANDING_DIR)/*.o | awk 'NF && $$NF !~ /:$$/ {print $$NF}' | \
+		sed 's/^_//' | sort -u > $(FREESTANDING_DIR)/undefined.txt
+	@printf '%s\n' $(FREESTANDING_ALLOWED) | sort > $(FREESTANDING_DIR)/allowed.txt
+	@comm -23 $(FREESTANDING_DIR)/undefined.txt $(FREESTANDING_DIR)/defined.txt | \
+		comm -23 - $(FREESTANDING_DIR)/allowed.txt > $(FREESTANDING_DIR)/extra.txt
+	@if [ -s $(FREESTANDING_DIR)/extra.txt ]; then \
+		cat $(FREESTANDING_DIR)/extra.txt; \
+		echo "library imports the symbols above; allowed: $(FREESTANDING_ALLOWED)"; \
+		exit 1; \
 	fi
-	@echo "OK: library imports no libc memory/string functions"
+	@echo "OK: library imports only $$(comm -12 $(FREESTANDING_DIR)/undefined.txt \
+		$(FREESTANDING_DIR)/allowed.txt | tr '\n' ' ')"
 
 # Add targets for test explorer
 test_explorer: $(BIN_DIR) $(OBJ_DIR) $(TEST_TARGETS)

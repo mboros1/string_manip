@@ -1,5 +1,5 @@
 Goal of this library is to create a full suite of string functions that operate on `const char*` and two pointer strings using crossplatform
-simd operations with no dependencies on the standard library, allowing it to work cross platform and in a free standing enviroment.
+simd operations with no dependencies on the standard library beyond `memcpy`, `memset`, `memmove` and `memcmp` (which the compiler requires anyway), allowing it to work cross platform and in a free standing enviroment.
 
 The library works on bytes: case functions are ASCII only, and `faf_string_utf8_valid` is the only UTF-8 aware function.
 
@@ -34,7 +34,60 @@ All architecture specific code is a small set of byte kernels (`faf_kernels.h`),
 
 The `ref` kernels are always compiled too, and every SIMD kernel is tested against them (`test_faf_kernels.c`). The library has no dependencies; simde is only used by the standalone `str_len_test` / `str_split_test` experiments.
 
-For a freestanding target with no libc, build with `-DFAF_PROVIDE_LIBC_MEM`: the compiler may emit calls to `memcpy`, `memset`, `memmove` and `memcmp` on its own, and this defines them.
+#### Freestanding builds
+
+The library needs no allocator, stdio or locale: memory comes from static pools. Its only external dependencies are `memcpy`, `memset`, `memmove` and `memcmp`, which GCC and Clang require from every environment, freestanding included, since they emit calls to them on their own (struct copies, zero initialization). `faf_memcpy` / `faf_memset` go through the compiler builtins, so small copies are inlined and large ones use the platform's tuned routines.
+
+Kernels, RTOSes, UEFI and embedded toolchains (newlib, picolibc) already provide the four. On a target with none at all, add minimal versions to your own build:
+
+```c
+#include <stddef.h>
+
+// Keep the compiler from turning these loops back into calls to themselves.
+#if defined(__clang__)
+#define NO_BUILTIN __attribute__((no_builtin))
+#else
+#define NO_BUILTIN __attribute__((optimize("no-tree-loop-distribute-patterns")))
+#endif
+
+NO_BUILTIN void *memcpy(void *restrict dst, const void *restrict src, size_t n) {
+  unsigned char *d = dst;
+  const unsigned char *s = src;
+  while (n--)
+    *d++ = *s++;
+  return dst;
+}
+
+NO_BUILTIN void *memset(void *dst, int c, size_t n) {
+  unsigned char *d = dst;
+  while (n--)
+    *d++ = (unsigned char)c;
+  return dst;
+}
+
+NO_BUILTIN void *memmove(void *dst, const void *src, size_t n) {
+  unsigned char *d = dst;
+  const unsigned char *s = src;
+  if (d < s) {
+    while (n--)
+      *d++ = *s++;
+  } else {
+    while (n--)
+      d[n] = s[n];
+  }
+  return dst;
+}
+
+NO_BUILTIN int memcmp(const void *a, const void *b, size_t n) {
+  const unsigned char *x = a, *y = b;
+  for (; n; --n, ++x, ++y)
+    if (*x != *y)
+      return *x < *y ? -1 : 1;
+  return 0;
+}
+```
+
+`make check_freestanding` builds the library with `-ffreestanding` and fails if it imports anything else.
 
 ## Building and Testing
 
@@ -95,7 +148,7 @@ make test_faf_string
 # Run the tests again on the portable scalar backend
 make check_backends
 
-# Check the optimized library imports no libc memory/string functions
+# Check the library, built freestanding, imports nothing but memcpy/memset/memmove/memcmp
 make check_freestanding
 
 # Build (at -O2) and run the benchmarks

@@ -37,8 +37,9 @@
 #define FAF_BACKEND_NAME "ref"
 #endif
 
-// Keep the compiler from recognizing loops as memcpy/memset/strlen and
-// replacing them with libc calls, so the library links freestanding.
+// Keep the compiler from recognizing loops as strlen/memchr/... and replacing
+// them with libc calls: the library may only depend on memcpy, memset, memmove
+// and memcmp (see faf_string_mem.h), so it links freestanding.
 #if defined(__clang__)
 #define FAF_NO_BUILTIN __attribute__((no_builtin))
 #elif defined(__GNUC__)
@@ -87,7 +88,6 @@ void faf_k_ascii_case(char *dst, const char *src, size_t n, bool upper);
 size_t faf_k_ascii_prefix(const char *s, size_t n);
 // dst[i] = src[n - 1 - i]. dst and src must not overlap.
 void faf_k_reverse(char *dst, const char *src, size_t n);
-// faf_memcpy / faf_memset are kernels too; see faf_string_mem.h.
 
 // Reference implementations (always available).
 size_t faf_ref_strlen(const char *s);
@@ -105,7 +105,5 @@ size_t faf_ref_mismatch_icase(const char *a, const char *b, size_t n);
 void faf_ref_ascii_case(char *dst, const char *src, size_t n, bool upper);
 size_t faf_ref_ascii_prefix(const char *s, size_t n);
 void faf_ref_reverse(char *dst, const char *src, size_t n);
-void *faf_ref_memcpy(void *restrict dst, const void *restrict src, size_t n);
-void *faf_ref_memset(void *dst, int c, size_t n);
 
 #endif // FAF_KERNELS_H

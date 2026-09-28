@@ -277,9 +277,6 @@ void bench_kernels(void) {
   group_begin("ascii_case lower", GB_PER_S);
   BIG_BENCH("simd", (faf_k_ascii_case(lower_buf, big, BIG, false), lower_buf[7]));
   BIG_BENCH("ref", (faf_ref_ascii_case(lower_buf, big, BIG, false), lower_buf[7]));
-  group_begin("memcpy", GB_PER_S);
-  BIG_BENCH("faf_memcpy", (faf_memcpy(lower_buf, big, BIG), lower_buf[9]));
-  BIG_BENCH("libc memcpy", (memcpy(lower_buf, big, BIG), lower_buf[9]));
   group_begin("utf8_valid (ascii)", GB_PER_S);
   BIG_BENCH("simd", faf_string_utf8_valid(faf_string_init_n(big, BIG)));
   group_begin("hash", GB_PER_S);

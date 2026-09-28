@@ -324,36 +324,6 @@ void faf_k_reverse(char *dst, const char *src, size_t n) {
   }
 }
 
-FAF_NO_BUILTIN
-void *faf_memcpy(void *restrict dst, const void *restrict src, size_t n) {
-  unsigned char *d = dst;
-  const unsigned char *s = src;
-  if (n < 16) {
-    while (n--)
-      *d++ = *s++;
-    return dst;
-  }
-  for (size_t i = 0; i + 16 <= n; i += 16)
-    v_storeu(d + i, v_loadu(s + i));
-  v_storeu(d + n - 16, v_loadu(s + n - 16)); // overlapping tail
-  return dst;
-}
-
-FAF_NO_BUILTIN
-void *faf_memset(void *dst, int c, size_t n) {
-  unsigned char *d = dst;
-  if (n < 16) {
-    while (n--)
-      *d++ = (unsigned char)c;
-    return dst;
-  }
-  v128 v = v_splat((uint8_t)c);
-  for (size_t i = 0; i + 16 <= n; i += 16)
-    v_storeu(d + i, v);
-  v_storeu(d + n - 16, v);
-  return dst;
-}
-
 #else // FAF_BACKEND_REF
 
 size_t faf_k_strlen(const char *s) { return faf_ref_strlen(s); }
@@ -393,48 +363,5 @@ size_t faf_k_ascii_prefix(const char *s, size_t n) {
 void faf_k_reverse(char *dst, const char *src, size_t n) {
   faf_ref_reverse(dst, src, n);
 }
-void *faf_memcpy(void *restrict dst, const void *restrict src, size_t n) {
-  return faf_ref_memcpy(dst, src, n);
-}
-void *faf_memset(void *dst, int c, size_t n) {
-  return faf_ref_memset(dst, c, n);
-}
 
-#endif
-
-#ifdef FAF_PROVIDE_LIBC_MEM
-// For freestanding targets without libc. GCC and Clang require the
-// environment to provide these four, and may emit calls to them regardless of
-// what the source says. Minimal: the library itself only needs the first two.
-FAF_NO_BUILTIN
-void *memcpy(void *restrict dst, const void *restrict src, size_t n) {
-  return faf_memcpy(dst, src, n);
-}
-
-FAF_NO_BUILTIN
-void *memset(void *dst, int c, size_t n) { return faf_memset(dst, c, n); }
-
-FAF_NO_BUILTIN
-void *memmove(void *dst, const void *src, size_t n) {
-  unsigned char *d = dst;
-  const unsigned char *s = src;
-  if (d < s) {
-    while (n--)
-      *d++ = *s++;
-  } else {
-    while (n--)
-      d[n] = s[n];
-  }
-  return dst;
-}
-
-FAF_NO_BUILTIN
-int memcmp(const void *a, const void *b, size_t n) {
-  const unsigned char *x = a, *y = b;
-  for (; n; --n, ++x, ++y) {
-    if (*x != *y)
-      return *x < *y ? -1 : 1;
-  }
-  return 0;
-}
 #endif

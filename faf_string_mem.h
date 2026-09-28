@@ -82,18 +82,78 @@ faf_string faf_string_copy(faf_region r, faf_string str);
 
 // ---- Memory primitives ----
 //
-// The library uses these instead of libc's memcpy/memset so it can build
-// freestanding (they are kernels: see faf_kernels_simd.c). Compilers still
-// emit calls to `memcpy`/`memset` on their own (struct copies, recognized
-// loops); for a target with no libc, build faf_kernels_simd.c with
-// -DFAF_PROVIDE_LIBC_MEM to also define memcpy, memset, memmove and memcmp,
-// which GCC and Clang require even when freestanding.
+// The environment's memcpy/memset. GCC and Clang require every environment,
+// freestanding included, to provide memcpy, memset, memmove and memcmp, and
+// these four are the library's only external dependencies. Going through the
+// builtins lets the compiler inline small, fixed-size copies.
+
+#if defined(__GNUC__) || defined(__clang__)
+#define FAF_BUILTIN_MEMCPY __builtin_memcpy
+#define FAF_BUILTIN_MEMSET __builtin_memset
+#else
+#include <string.h>
+#define FAF_BUILTIN_MEMCPY memcpy
+#define FAF_BUILTIN_MEMSET memset
+#endif
+
+// Short lengths, which dominate string work, are handled inline with a few
+// overlapping fixed-size copies (two k-byte pieces cover every length in
+// [k, 2k]); fixed-size builtin copies compile to plain loads and stores, 16
+// bytes at a time where the target has vectors. Only longer lengths call the
+// platform's tuned memcpy/memset.
 
 // Copy `n` bytes from `src` to `dst`. The ranges must not overlap.
-void *faf_memcpy(void *restrict dst, const void *restrict src, size_t n);
+static inline void *faf_memcpy(void *restrict dst, const void *restrict src,
+                               size_t n) {
+  unsigned char *d = (unsigned char *)dst;
+  const unsigned char *s = (const unsigned char *)src;
+  // restrict: the ranges don't overlap, so the overlapping pieces can be
+  // copied directly. Shortest first: they are the most common, and each
+  // check in front of them costs.
+  if (n < 16) {
+    if (n >= 8) {
+      FAF_BUILTIN_MEMCPY(d, s, 8);
+      FAF_BUILTIN_MEMCPY(d + n - 8, s + n - 8, 8);
+    } else if (n >= 4) {
+      FAF_BUILTIN_MEMCPY(d, s, 4);
+      FAF_BUILTIN_MEMCPY(d + n - 4, s + n - 4, 4);
+    } else if (n) { // 1..3: first, middle and last byte
+      d[0] = s[0];
+      d[n / 2] = s[n / 2];
+      d[n - 1] = s[n - 1];
+    }
+  } else if (n <= 32) {
+    FAF_BUILTIN_MEMCPY(d, s, 16);
+    FAF_BUILTIN_MEMCPY(d + n - 16, s + n - 16, 16);
+  } else if (n <= 64) {
+    FAF_BUILTIN_MEMCPY(d, s, 16);
+    FAF_BUILTIN_MEMCPY(d + 16, s + 16, 16);
+    FAF_BUILTIN_MEMCPY(d + n - 32, s + n - 32, 16);
+    FAF_BUILTIN_MEMCPY(d + n - 16, s + n - 16, 16);
+  } else {
+    return FAF_BUILTIN_MEMCPY(dst, src, n);
+  }
+  return dst;
+}
 
 // Set `n` bytes at `dst` to `(unsigned char)c`.
-void *faf_memset(void *dst, int c, size_t n);
+static inline void *faf_memset(void *dst, int c, size_t n) {
+  unsigned char *d = (unsigned char *)dst;
+  if (n > 16)
+    return FAF_BUILTIN_MEMSET(dst, c, n);
+  uint64_t v = (uint64_t)(unsigned char)c * 0x0101010101010101ull;
+  if (n >= 8) {
+    FAF_BUILTIN_MEMCPY(d, &v, 8);
+    FAF_BUILTIN_MEMCPY(d + n - 8, &v, 8);
+  } else if (n >= 4) {
+    uint32_t w = (uint32_t)v;
+    FAF_BUILTIN_MEMCPY(d, &w, 4);
+    FAF_BUILTIN_MEMCPY(d + n - 4, &w, 4);
+  } else if (n) {
+    d[0] = d[n / 2] = d[n - 1] = (unsigned char)c;
+  }
+  return dst;
+}
 
 // True if [p, p + n) lies inside pool storage, i.e. is owned by some region.
 bool faf_mem_contains(const void *p, size_t n);
