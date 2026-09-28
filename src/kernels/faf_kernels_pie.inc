@@ -86,16 +86,17 @@ static inline uint32_t chunk_has_high(const char *p) {
 }
 
 // find_byte entirely in assembly (windowed ABI: a2 = s, a3 = n, a4 = c), so
-// the hardware loops and the register use don't depend on GCC. Same shape as
-// the C version: SWAR over the lead (64+ bytes to a 64-byte boundary), PIE
-// over whole chunks, SWAR over a matching chunk and over the tail. Inputs
-// shorter than lead + one chunk are scanned by SWAR only. In C, how GCC
-// compiled the lead (hardware loop or not) decided short-input speed; here it
-// is fixed, and short searches are faster than plain SWAR.
+// the hardware loops and the register use don't depend on GCC. Words over the
+// lead (64+ bytes to a 64-byte boundary), PIE over whole chunks, words over a
+// matching chunk and over the tail; inputs shorter than lead + one chunk are
+// words only. A word is XORed with c in every lane, then each byte tested
+// with its own BNONE as in strlen: 7 instructions per word, and the branch
+// taken says which byte.
 //
-// Registers: a2 s, a3 n, a4 c, a5 cursor, a6 end of the SWAR range,
-// a7 c in every lane, a10 0x7f7f7f7f, a11 -1, a12 nonzero once the scan may
-// only end the search (short input, rescan, tail), a8/a9/a13-a15 temporaries.
+// Registers: a2 s, a4 c, a5 cursor, a6 end of the word range, a7 c in every
+// lane, a10/a11/a14/a15 the byte masks 0xff << 8k, a12 nonzero once the scan
+// may only end the search (short input, rescan, tail), a3 (n, until the end
+// pointer is known), a8/a9/a13 temporaries.
 __asm__(
     ".pushsection .text.faf_k_find_byte,\"ax\",@progbits\n"
     ".align 4\n"
@@ -108,8 +109,10 @@ __asm__(
     "  or      a7, a4, a8\n"
     "  slli    a8, a7, 16\n"
     "  or      a7, a7, a8\n"
-    "  movi    a10, 0x7f7f7f7f\n"
-    "  movi    a11, -1\n"
+    "  movi    a10, 0xff\n"
+    "  movi    a11, 0xff00\n"
+    "  movi    a14, 0xff0000\n"
+    "  movi    a15, 0xff000000\n"
     "  neg     a8, a2\n"
     "  extui   a8, a8, 0, 6\n"           // to_chunk(s)
     "  addi    a8, a8, 64\n"             // head
@@ -117,10 +120,10 @@ __asm__(
     "  mov     a5, a2\n"
     "  add     a6, a2, a3\n"             // end
     "  movi    a12, 1\n"
-    "  bltu    a3, a9, .Lfb_scan\n"      // short: SWAR over everything
+    "  bltu    a3, a9, .Lfb_scan\n"      // short: words over everything
     "  add     a6, a2, a8\n"             // lead end
     "  movi    a12, 0\n"
-    // SWAR over [a5, a6): match -> .Lfb_found, else .Lfb_done
+    // words over [a5, a6): match -> .Lfb_found, else .Lfb_done
     ".Lfb_scan:\n"
     ".Lfb_bytes:\n"
     "  bgeu    a5, a6, .Lfb_done\n"
@@ -132,63 +135,40 @@ __asm__(
     "  j       .Lfb_bytes\n"
     ".Lfb_words:\n"
     "  sub     a8, a6, a5\n"
-    "  srli    a13, a8, 3\n"         // pairs of words
-    "  beqz    a13, .Lfb_single\n"
-    "  loop    a13, .Lfb_pairs_end\n"
+    "  srli    a13, a8, 2\n"
+    "  beqz    a13, .Lfb_tail\n"
+    "  loop    a13, .Lfb_words_end\n"
     "  l32i    a8, a5, 0\n"
-    "  l32i    a9, a5, 4\n"
+    "  addi    a5, a5, 4\n"              // between the load and its use
     "  xor     a8, a8, a7\n"
-    "  xor     a9, a9, a7\n"
-    "  and     a14, a8, a10\n"
-    "  and     a15, a9, a10\n"
-    "  add     a14, a14, a10\n"
-    "  add     a15, a15, a10\n"
-    "  or      a14, a14, a8\n"
-    "  or      a15, a15, a9\n"
-    "  or      a14, a14, a10\n"
-    "  or      a15, a15, a10\n"
-    "  bnall   a14, a11, .Lfb_hit0\n"
-    "  bnall   a15, a11, .Lfb_hit1\n"
-    "  addi    a5, a5, 8\n"
-    ".Lfb_pairs_end:\n"
-    ".Lfb_single:\n"
-    "  sub     a8, a6, a5\n"
-    "  bltui   a8, 4, .Lfb_tail\n"
-    "  l32i    a8, a5, 0\n"
-    "  xor     a8, a8, a7\n"
-    "  and     a14, a8, a10\n"
-    "  add     a14, a14, a10\n"
-    "  or      a14, a14, a8\n"
-    "  or      a14, a14, a10\n"
-    "  bnall   a14, a11, .Lfb_hit0\n"
-    "  addi    a5, a5, 4\n"
+    "  bnone   a8, a10, .Lfb_w0\n"
+    "  bnone   a8, a11, .Lfb_w1\n"
+    "  bnone   a8, a14, .Lfb_w2\n"
+    "  bnone   a8, a15, .Lfb_w3\n"
+    ".Lfb_words_end:\n"
     ".Lfb_tail:\n"
     "  bgeu    a5, a6, .Lfb_done\n"
     "  l8ui    a9, a5, 0\n"
     "  beq     a9, a4, .Lfb_found\n"
     "  addi    a5, a5, 1\n"
     "  j       .Lfb_tail\n"
-    ".Lfb_hit1:\n"
-    "  addi    a5, a5, 4\n"
-    "  mov     a14, a15\n"
-    ".Lfb_hit0:\n"                        // a14: ~mask, lanes of a match
-    "  xor     a14, a14, a11\n"
-    "  neg     a8, a14\n"
-    "  and     a8, a8, a14\n"             // lowest set bit
-    "  nsau    a8, a8\n"
-    "  movi    a9, 31\n"
-    "  sub     a8, a9, a8\n"
-    "  srli    a8, a8, 3\n"
-    "  add     a5, a5, a8\n"
+    ".Lfb_w0:\n"                         // byte k of the word before a5
+    "  addi    a5, a5, -1\n"
+    ".Lfb_w1:\n"
+    "  addi    a5, a5, -1\n"
+    ".Lfb_w2:\n"
+    "  addi    a5, a5, -1\n"
+    ".Lfb_w3:\n"
+    "  addi    a5, a5, -1\n"
     ".Lfb_found:\n"
     "  sub     a2, a5, a2\n"
     "  retw\n"
     ".Lfb_done:\n"
     "  bnez    a12, .Lfb_none\n"
     // PIE over whole chunks from a5 (64-byte aligned)
-    "  add     a6, a2, a3\n"
+    "  add     a6, a2, a3\n"             // end, for the tail
     "  sub     a8, a6, a5\n"
-    "  srli    a13, a8, 6\n"         // chunks, at least 1
+    "  srli    a13, a8, 6\n"             // chunks, at least 1
     "  s8i     a4, a1, 0\n"
     "  ee.vldbc.8 q7, a1\n"
     "  loop    a13, .Lfb_chunks_end\n"
@@ -205,11 +185,11 @@ __asm__(
     "  ee.orq  q0, q0, q2\n"
     "  ee.movi.32.a q0, a8, 0\n"
     "  ee.movi.32.a q0, a9, 1\n"
-    "  ee.movi.32.a q0, a14, 2\n"
-    "  ee.movi.32.a q0, a15, 3\n"
+    "  ee.movi.32.a q0, a3, 2\n"         // n is no longer needed
+    "  ee.movi.32.a q0, a13, 3\n"        // the loop count is in LCOUNT
     "  or      a8, a8, a9\n"
-    "  or      a14, a14, a15\n"
-    "  or      a8, a8, a14\n"
+    "  or      a3, a3, a13\n"
+    "  or      a8, a8, a3\n"
     "  bnez    a8, .Lfb_chunk_hit\n"
     ".Lfb_chunks_end:\n"
     "  movi    a12, 1\n"                 // tail: a6 is the end
@@ -218,9 +198,9 @@ __asm__(
     "  addi    a5, a5, -64\n"
     "  addi    a6, a5, 64\n"
     "  movi    a12, 1\n"
-    "  j       .Lfb_scan\n"
-    ".Lfb_none:\n"
-    "  mov     a2, a3\n"
+    "  j       .Lfb_words\n"
+    ".Lfb_none:\n"                       // a6 is the end: s + n
+    "  sub     a2, a6, a2\n"
     "  retw\n"
     ".size faf_k_find_byte, .-faf_k_find_byte\n"
     ".popsection\n");

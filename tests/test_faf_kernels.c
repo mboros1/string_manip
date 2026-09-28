@@ -325,11 +325,29 @@ static void test_long(void) {
   ASSERT_INT_EQ(0, failures, "long inputs differ from reference");
 }
 
+// A search that ends inside a hardware loop (Xtensa) leaves its counter
+// nonzero; the next call must not loop back when it branches past an empty
+// loop. The second search has no whole word, and its byte 3 matches: looping
+// back would scan that word and return 3.
+static void test_after_exit(void) {
+  static _Alignas(64) char a[64], b[8];
+  failures = 0;
+  for (size_t at = 0; at < 16; ++at) {
+    memset(a, 'x', sizeof a);
+    a[at] = ',';
+    memcpy(b, "abzy", 4);
+    CHECK_EQ(at, faf_k_find_byte(a, sizeof a, ','), "early exit", 0, at);
+    CHECK_EQ(2, faf_k_find_byte(b, 2, 'y'), "after early exit", 0, 2);
+    CHECK_EQ(3, faf_k_find_byte(b, 3, 'y'), "after early exit", 0, 3);
+  }
+  ASSERT_INT_EQ(0, failures, "a search after an early exit differs");
+}
+
 static test_case_t kernel_tests[] = {
     {"find_count", test_find_count}, {"sets", test_sets},
     {"byteset", test_byteset},       {"mismatch", test_mismatch},
     {"strlen", test_strlen},         {"transforms", test_transforms},
-    {"long", test_long},
+    {"long", test_long},             {"after_exit", test_after_exit},
 };
 
 // Setup and teardown functions
