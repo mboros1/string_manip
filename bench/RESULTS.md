@@ -8,6 +8,10 @@ Numbers are the best of several runs. Operations are ns per operation (lower is 
 
 Noise: the ESP32 boards run the library and benchmarks from IRAM and repeat within 0.1%. The Mac is noisier: most rows repeat within 3%, but rows that read files or call malloc/realloc can move about 5% between runs of the same code.
 
+## Known trade-offs
+
+- **ESP32-S3, pie backend** (since `38bd90f`): the PIE vector kernels are 3-10x faster than SWAR on long inputs, but searches that end within the first ~100 bytes are slower: `find_byte`/`strlen` on 85-byte lines ~19%, `next_token` ~8%. How GCC compiles the SWAR part inside the PIE entry points (hardware loops or not) is what decides this; several restructurings only moved the cost around. `faf_tokens` is unaffected, and `-DFAF_BACKEND_SWAR` builds plain SWAR on the S3.
+
 ## Reproducing
 
 ```sh
@@ -30,6 +34,7 @@ Apple M1 Max, Darwin 25.0.0, Apple clang version 17.0.0 (clang-1700.6.4.2)
 | 2026-09-28 `d6237e9b6` benchmark tracking: record runs to bench/results, compare, R | neon | 103 | 315 | 55.4 | 124 |  | 72.3 | 75.8 | 11,576 | 1,372 |
 | 2026-09-28 `2335dc5de` format: use out-of-line builder appends (inlining them made  | neon | 104 | 313 | 55.0 | 121 |  | 71.4 | 75.8 | 9,868 | 774 |
 | 2026-09-28 `7b7a72194` faf_tokens: batched split iterator, separators found 16 at a | neon | 104 | 314 | 54.7 | 123 | 67.8 | 72.5 | 76.0 | 9,884 | 772 |
+| 2026-09-28 `38bd90fa9` pie: SWAR lead inlined in the same unit, 64-byte chunks, 32- | neon | 103 | 312 | 55.1 | 122 | 67.3 | 72.1 | 75.3 | 9,860 | 794 |
 
 **Kernels, MB/s (higher is better)**
 
@@ -38,6 +43,7 @@ Apple M1 Max, Darwin 25.0.0, Apple clang version 17.0.0 (clang-1700.6.4.2)
 | 2026-09-28 `d6237e9b6` benchmark tracking: record runs to bench/results, compare, R | neon | 61,830 | 24,920 | 42,420 | 30,990 | 8,520 | 10,690 |
 | 2026-09-28 `2335dc5de` format: use out-of-line builder appends (inlining them made  | neon | 61,540 | 24,920 | 42,280 | 31,060 | 8,530 | 10,570 |
 | 2026-09-28 `7b7a72194` faf_tokens: batched split iterator, separators found 16 at a | neon | 61,830 | 24,920 | 42,280 | 31,060 | 8,540 | 10,680 |
+| 2026-09-28 `38bd90fa9` pie: SWAR lead inlined in the same unit, 64-byte chunks, 32- | neon | 61,830 | 24,920 | 42,280 | 31,060 | 8,540 | 10,680 |
 
 ## esp32
 
@@ -50,6 +56,7 @@ esp32 rev 301, 240 MHz, ESP-IDF v6.1
 | 2026-09-28 `76e2bcd30` ESP32 bench runs from IRAM (flash cache layout made runs inc | swar | 7,625 | 57,252 | 4,400 | 5,815 |  | 5,200 | 7,326 | 1,451,534 | 144,788 |
 | 2026-09-28 `2335dc5de` format: use out-of-line builder appends (inlining them made  | swar | 7,625 | 57,252 | 4,400 | 5,815 |  | 5,200 | 7,326 | 703,694 | 111,228 |
 | 2026-09-28 `7b7a72194` faf_tokens: batched split iterator, separators found 16 at a | swar | 7,615 | 57,365 | 4,382 | 5,810 | 5,090 | 5,195 | 7,326 | 703,694 | 111,228 |
+| 2026-09-28 `38bd90fa9` pie: SWAR lead inlined in the same unit, 64-byte chunks, 32- | swar | 7,610 | 57,355 | 4,385 | 5,810 | 5,090 | 5,195 | 7,319 | 703,694 | 111,228 |
 
 **Kernels, MB/s (higher is better)**
 
@@ -58,6 +65,7 @@ esp32 rev 301, 240 MHz, ESP-IDF v6.1
 | 2026-09-28 `76e2bcd30` ESP32 bench runs from IRAM (flash cache layout made runs inc | swar | 101 | 56.4 | 119 | 59.9 | 19.2 | 38.3 |
 | 2026-09-28 `2335dc5de` format: use out-of-line builder appends (inlining them made  | swar | 101 | 56.3 | 119 | 59.9 | 19.2 | 38.3 |
 | 2026-09-28 `7b7a72194` faf_tokens: batched split iterator, separators found 16 at a | swar | 101 | 56.3 | 119 | 59.9 | 19.2 | 38.3 |
+| 2026-09-28 `38bd90fa9` pie: SWAR lead inlined in the same unit, 64-byte chunks, 32- | swar | 101 | 56.3 | 119 | 59.9 | 19.2 | 38.3 |
 
 ## esp32s3
 
@@ -70,6 +78,7 @@ esp32s3 rev 2, 240 MHz, ESP-IDF v6.1
 | 2026-09-28 `76e2bcd30` ESP32 bench runs from IRAM (flash cache layout made runs inc | swar | 6,855 | 45,892 | 3,850 | 5,035 |  | 4,650 | 6,743 | 1,201,680 | 130,580 |
 | 2026-09-28 `2335dc5de` format: use out-of-line builder appends (inlining them made  | swar | 6,858 | 45,895 | 3,850 | 5,035 |  | 4,650 | 6,743 | 586,754 | 101,972 |
 | 2026-09-28 `7b7a72194` faf_tokens: batched split iterator, separators found 16 at a | swar | 6,852 | 45,940 | 3,832 | 5,032 | 4,452 | 4,645 | 6,743 | 586,756 | 101,972 |
+| 2026-09-28 `38bd90fa9` pie: SWAR lead inlined in the same unit, 64-byte chunks, 32- | pie | 6,848 | 45,938 | 3,838 | 5,440 | 4,465 | 4,648 | 6,833 | 586,760 | 101,976 |
 
 **Kernels, MB/s (higher is better)**
 
@@ -78,3 +87,4 @@ esp32s3 rev 2, 240 MHz, ESP-IDF v6.1
 | 2026-09-28 `76e2bcd30` ESP32 bench runs from IRAM (flash cache layout made runs inc | swar | 112 | 59.9 | 136 | 72.3 | 21.8 | 39.9 |
 | 2026-09-28 `2335dc5de` format: use out-of-line builder appends (inlining them made  | swar | 112 | 59.9 | 136 | 72.3 | 21.8 | 39.9 |
 | 2026-09-28 `7b7a72194` faf_tokens: batched split iterator, separators found 16 at a | swar | 112 | 59.9 | 136 | 72.3 | 21.8 | 39.9 |
+| 2026-09-28 `38bd90fa9` pie: SWAR lead inlined in the same unit, 64-byte chunks, 32- | pie | 439 | 584 | 460 | 231 | 21.8 | 39.9 |

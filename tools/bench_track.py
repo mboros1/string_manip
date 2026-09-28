@@ -229,6 +229,14 @@ def cmd_report(args):
            "repeat within 0.1%. The Mac is noisier: most rows repeat within 3%, "
            "but rows that read files or call malloc/realloc can move about 5% "
            "between runs of the same code.", "",
+           "## Known trade-offs", "",
+           "- **ESP32-S3, pie backend** (since `38bd90f`): the PIE vector kernels "
+           "are 3-10x faster than SWAR on long inputs, but searches that end within "
+           "the first ~100 bytes are slower: `find_byte`/`strlen` on 85-byte lines "
+           "~19%, `next_token` ~8%. How GCC compiles the SWAR part inside the PIE "
+           "entry points (hardware loops or not) is what decides this; several "
+           "restructurings only moved the cost around. `faf_tokens` is unaffected, "
+           "and `-DFAF_BACKEND_SWAR` builds plain SWAR on the S3.", "",
            "## Reproducing", "",
            "```sh",
            "git checkout <commit>",
