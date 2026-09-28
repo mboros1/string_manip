@@ -234,8 +234,9 @@ def cmd_report(args):
            "than SWAR on long inputs. With the entry points in C (`38bd90f`), "
            "searches ending within the first ~100 bytes were slower than SWAR "
            "(~19% on 85-byte lines), depending on how GCC compiled the SWAR lead. "
-           "`find_byte` and `strlen` are now whole functions in assembly and no "
-           "longer pay this; `mismatch` and `ascii_prefix` still do (~5%). "
+           "`find_byte`, `find_bytes`, `strlen` and `mismatch` are now whole "
+           "functions in assembly and no longer pay this; `ascii_prefix` still "
+           "does. "
            "`-DFAF_BACKEND_SWAR` builds plain SWAR on the S3.", "",
            "## Reproducing", "",
            "```sh",

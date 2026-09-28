@@ -10,7 +10,7 @@ Noise: the ESP32 boards run the library and benchmarks from IRAM and repeat with
 
 ## Known trade-offs
 
-- **ESP32-S3, pie backend**: the PIE vector kernels are 3-10x faster than SWAR on long inputs. With the entry points in C (`38bd90f`), searches ending within the first ~100 bytes were slower than SWAR (~19% on 85-byte lines), depending on how GCC compiled the SWAR lead. `find_byte` and `strlen` are now whole functions in assembly and no longer pay this; `mismatch` and `ascii_prefix` still do (~5%). `-DFAF_BACKEND_SWAR` builds plain SWAR on the S3.
+- **ESP32-S3, pie backend**: the PIE vector kernels are 3-10x faster than SWAR on long inputs. With the entry points in C (`38bd90f`), searches ending within the first ~100 bytes were slower than SWAR (~19% on 85-byte lines), depending on how GCC compiled the SWAR lead. `find_byte`, `find_bytes`, `strlen` and `mismatch` are now whole functions in assembly and no longer pay this; `ascii_prefix` still does. `-DFAF_BACKEND_SWAR` builds plain SWAR on the S3.
 
 ## Reproducing
 
@@ -85,6 +85,7 @@ esp32s3 rev 2, 240 MHz, ESP-IDF v6.1
 | 2026-09-28 `3a98ba0ba` pie: strlen word loops with BNONE per byte (as the ROM strle | pie | 6,848 | 45,940 | 3,832 | 4,848 | 4,452 | 4,645 |  |  |  |
 | 2026-09-28 `a0eea12fc` pie: find_byte word loops with XOR + BNONE per byte; test fo | pie | 6,845 | 45,938 | 3,832 | 4,375 | 4,452 | 4,645 |  |  |  |
 | 2026-09-28 `7d4b0dd95` pie: find_bytes in assembly (two words per loop, BNONE per b | pie | 5,918 | 45,928 | 2,900 | 4,375 | 3,455 | 3,715 |  |  |  |
+| 2026-09-28 `e52885f38` pie: mismatch in assembly (SSA8L/SRC funnel shift for unalig | pie | 5,912 | 45,928 | 2,900 | 4,375 | 3,455 | 3,715 |  |  |  |
 
 **Kernels, MB/s (higher is better)**
 
@@ -100,3 +101,4 @@ esp32s3 rev 2, 240 MHz, ESP-IDF v6.1
 | 2026-09-28 `3a98ba0ba` pie: strlen word loops with BNONE per byte (as the ROM strle | pie | 717 | 585 | 716 | 234 | 21.8 | 39.9 |
 | 2026-09-28 `a0eea12fc` pie: find_byte word loops with XOR + BNONE per byte; test fo | pie | 724 | 584 | 716 | 234 | 21.8 | 39.9 |
 | 2026-09-28 `7d4b0dd95` pie: find_bytes in assembly (two words per loop, BNONE per b | pie | 724 | 585 | 716 | 234 | 21.8 | 38.3 |
+| 2026-09-28 `e52885f38` pie: mismatch in assembly (SSA8L/SRC funnel shift for unalig | pie | 724 | 585 | 715 | 415 | 21.8 | 39.9 |
