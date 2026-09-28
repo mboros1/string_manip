@@ -242,6 +242,7 @@ static size_t memchr_idx(const char *s, size_t n, char c) {
 
 static char lower_buf[BIG + 64];
 static char *line_copies[NLINES];
+static size_t positions[16];
 
 void bench_kernels(void) {
   // big: random text with a comma every ~40 bytes, no NUL until the end
@@ -260,6 +261,9 @@ void bench_kernels(void) {
   LINES_BENCH(FAF_BACKEND_NAME, faf_k_find_byte(s, n, '#'));
   LINES_BENCH("ref", faf_ref_find_byte(s, n, '#'));
   LINES_BENCH("libc memchr", memchr_idx(s, n, '#'));
+  group_begin("find_bytes ',' (all ~7 per line)", NS_PER_OP);
+  LINES_BENCH(FAF_BACKEND_NAME, faf_k_find_bytes(s, n, ',', positions, 16));
+  LINES_BENCH("ref", faf_ref_find_bytes(s, n, ',', positions, 16));
   group_begin("strlen", NS_PER_OP);
   LINES_BENCH(FAF_BACKEND_NAME, faf_k_strlen(s + (i & 7)));
   LINES_BENCH("ref", faf_ref_strlen(s + (i & 7)));
