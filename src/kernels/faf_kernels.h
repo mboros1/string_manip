@@ -4,10 +4,9 @@
 // Byte kernels: the only code in the library that is architecture specific.
 // Everything else is written against these functions.
 //
-// Backends (chosen at compile time):
-//   sse2  x86 / x86-64 (SSE2 is part of the x86-64 baseline)
-//   neon  AArch64 / ARMv7 with NEON
-//   ref   portable scalar C: any other target, or forced with FAF_BACKEND_REF
+// Backends (chosen at compile time, see faf_backend.h): sse2, neon, swar
+// (a machine word as 4 or 8 byte lanes, for every other 32/64-bit CPU) and
+// ref (a byte at a time).
 //
 // The ref kernels are always compiled as faf_ref_* too, and serve as the
 // oracle the SIMD backends are tested against.
@@ -36,6 +35,14 @@
   __attribute__((optimize("no-tree-loop-distribute-patterns")))
 #else
 #define FAF_NO_BUILTIN
+#endif
+
+// Kernels deliberately read past a string's ends (never past its pages, see
+// above). Those loads are what AddressSanitizer must skip.
+#if defined(__clang__) || defined(__GNUC__)
+#define FAF_NO_ASAN __attribute__((no_sanitize_address))
+#else
+#define FAF_NO_ASAN
 #endif
 
 // A set of bytes, for find_set/rfind_set. Build once, search many times.

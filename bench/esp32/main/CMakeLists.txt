@@ -12,8 +12,8 @@ idf_component_register(SRCS main.c ${LIB_SRCS} ${BENCH_SRCS}
 set_source_files_properties(${ROOT}/bench/bench_faf_string.c
                             PROPERTIES COMPILE_DEFINITIONS "main=bench_main")
 
-# 16 KB regions like the host default (4 x 2048 slots of 8 bytes), and
-# inputs sized for a few hundred KB of RAM
+# 16 KB regions like the host default (4 pools of 4096 slots of 4 bytes, the
+# 32-bit SWAR slot size), and inputs sized for a few hundred KB of RAM
 target_compile_definitions(${COMPONENT_LIB} PRIVATE
-                           FAF_NPOOLS=4 FAF_POOL_SLOTS=2048
+                           FAF_NPOOLS=4 FAF_POOL_SLOTS=4096
                            NLINES=400 BENCH_BIG=8192)

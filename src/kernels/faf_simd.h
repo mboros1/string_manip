@@ -12,13 +12,6 @@
 
 #include "faf_kernels.h"
 
-#if defined(__clang__) || defined(__GNUC__)
-// Kernels deliberately read past a string's ends (never past its pages, see
-// faf_kernels.h). The loads are here, so this is what ASan must skip.
-#define FAF_NO_ASAN __attribute__((no_sanitize_address))
-#else
-#define FAF_NO_ASAN
-#endif
 
 #if defined(FAF_BACKEND_SSE2)
 

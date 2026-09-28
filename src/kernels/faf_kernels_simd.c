@@ -323,7 +323,7 @@ void faf_k_reverse(char *dst, const char *src, size_t n) {
   }
 }
 
-#else // FAF_BACKEND_REF
+#elif defined(FAF_BACKEND_REF)
 
 size_t faf_k_strlen(const char *s) { return faf_ref_strlen(s); }
 size_t faf_k_find_byte(const char *s, size_t n, char c) {

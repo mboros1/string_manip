@@ -127,17 +127,7 @@ faf_string faf_string_copy(faf_region r, faf_string str);
 #define FAF_BUILTIN_MEMSET memset
 #endif
 
-// CPUs where unaligned 8- and 16-byte loads and stores are single, fast
-// instructions. Elsewhere (the original ESP32, most microcontrollers) each
-// unaligned fixed-size copy becomes a byte loop or a memcpy call, so the
-// inline paths below would only add code: they are left out.
-#if defined(__x86_64__) || defined(__i386__) || defined(_M_X64) ||             \
-    defined(_M_IX86) || defined(__aarch64__) || defined(_M_ARM64) ||           \
-    defined(__riscv_misaligned_fast)
-#define FAF_FAST_UNALIGNED 1
-#else
-#define FAF_FAST_UNALIGNED 0
-#endif
+// (FAF_FAST_UNALIGNED comes from faf_backend.h)
 
 // Short lengths, which dominate string work, are handled inline with a few
 // overlapping fixed-size copies (two k-byte pieces cover every length in

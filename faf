@@ -28,7 +28,8 @@ ACTIONS = [
 ]
 BACKENDS = [
     ("simd", "SIMD kernels"),
-    ("ref", "portable scalar reference kernels"),
+    ("swar", "word-at-a-time kernels (the default without SIMD)"),
+    ("ref", "byte-at-a-time reference kernels"),
 ]
 ARCHES = [
     ("native", "this machine's architecture"),
@@ -118,15 +119,15 @@ def make_command(choices, make_args=()):
 
     variant = "-".join(part for part, on in (
         ("x86_64", arch == "x86_64"),
-        ("ref", backend == "ref"),
+        (backend, backend != "simd"),
         ("O2", opt == "O2"),
     ) if on)
     if variant:
         cmd += [f"OBJ_DIR=obj/{variant}", f"BIN_DIR=bin/{variant}"]
 
     extra = []
-    if backend == "ref":
-        extra.append("-DFAF_BACKEND_REF")
+    if backend != "simd":
+        extra.append(f"-DFAF_BACKEND_{backend.upper()}")
     if arch == "x86_64":
         extra += ["-arch", "x86_64"]
     if extra:

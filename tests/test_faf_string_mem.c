@@ -205,11 +205,11 @@ static void test_copy_from_region(void) {
 
 static void test_copy_out_of_space(void) {
   faf_region r = faf_region_acquire();
-  faf_reserve(r, FAF_POOL_SLOTS - 1);
+  faf_reserve(r, FAF_POOL_SLOTS - faf_slots_for(5)); // room for one "short"
 
   faf_string fits = faf_string_copy(r, faf_string_init("short"));
   faf_string none = faf_string_copy(r, faf_string_init("short"));
-  ASSERT_FALSE(faf_string_is_none(fits), "Copy into the last slot failed");
+  ASSERT_FALSE(faf_string_is_none(fits), "Copy into the last slots failed");
   ASSERT_TRUE(faf_string_is_none(none), "Copy into a full region succeeded");
 
   faf_region_release(r);

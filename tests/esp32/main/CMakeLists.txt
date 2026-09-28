@@ -17,6 +17,7 @@ foreach(f ${TEST_SRCS})
 endforeach()
 file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/test_list.h "${TEST_LIST}")
 
-# Pools sized for a microcontroller: 4 x 8 KB. Tests that need bigger
-# regions skip themselves (TEST_REQUIRE).
-target_compile_definitions(${COMPONENT_LIB} PRIVATE FAF_NPOOLS=4 FAF_POOL_SLOTS=512)
+# Pools sized for a microcontroller: 4 pools of 2048 slots, 8 KB each with
+# the 4-byte slots of the 32-bit SWAR backend. Tests that need bigger regions
+# skip themselves (TEST_REQUIRE).
+target_compile_definitions(${COMPONENT_LIB} PRIVATE FAF_NPOOLS=4 FAF_POOL_SLOTS=2048)

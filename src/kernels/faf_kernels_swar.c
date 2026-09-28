@@ -1,0 +1,355 @@
+#include "faf_kernels.h"
+
+// SWAR kernels ("SIMD within a register"): a machine word used as 4 or 8 byte
+// lanes, for CPUs without SSE2/NEON. The byte tests below never carry from
+// one lane into the next, so their masks are exact.
+//
+// Every kernel works the same way: bytes one at a time until the address is
+// word aligned, then aligned words, then the last bytes one at a time. Only
+// faf_k_strlen reads past the range (to the end of the word holding the
+// NUL), and an aligned word never crosses a page, so that is safe on any
+// memory. Aligned loads also suit CPUs that fault on unaligned ones (ESP32).
+
+#if defined(FAF_BACKEND_SWAR)
+
+typedef uintptr_t word;
+// may_alias: words are read out of char data
+typedef uintptr_t __attribute__((may_alias)) word_alias;
+
+#define W sizeof(word)
+#define ONES ((word)-1 / 0xFF) // 0x01 in every lane
+#define HIGHS (ONES * 0x80)
+#define LOWS7 (ONES * 0x7F)
+
+static inline bool aligned(const void *p) {
+  return ((uintptr_t)p & (W - 1)) == 0;
+}
+
+// `p` must be word aligned
+static inline word load(const char *p) {
+  return *(const word_alias *)(const void *)p;
+}
+
+static inline word bcast(unsigned char c) { return ONES * c; }
+
+// 0x80 in every lane of x that is zero
+static inline word zero_lanes(word x) {
+  return ~(((x & LOWS7) + LOWS7) | x | LOWS7);
+}
+
+// 0x80 in every lane of x that is not zero
+static inline word nonzero_lanes(word x) {
+  return (((x & LOWS7) + LOWS7) | x) & HIGHS;
+}
+
+// 0x80 in every lane of x in [lo, hi], for lo, hi < 0x80
+static inline word range_lanes(word x, unsigned char lo, unsigned char hi) {
+  word t = x & LOWS7;          // at most 0x7F per lane: the adds can't carry
+  word ge = t + bcast(0x80 - lo);  // high bit set where t >= lo
+  word gt = t + bcast(0x7F - hi);  // high bit set where t > hi
+  return ge & ~gt & ~x & HIGHS;    // ~x: bytes >= 0x80 are never in range
+}
+
+// ASCII case conversion of every lane: flip bit 5 where the lane is a letter
+// of the other case
+static inline word to_case(word x, bool upper) {
+  word letters = upper ? range_lanes(x, 'a', 'z') : range_lanes(x, 'A', 'Z');
+  return x ^ (letters >> 2);
+}
+
+// Lane index of the first / last set lane of a mask (little-endian)
+static inline size_t first_lane(word m) {
+#if FAF_VECTOR_BYTES == 8
+  return (size_t)__builtin_ctzll(m) / 8;
+#else
+  return (size_t)__builtin_ctz(m) / 8;
+#endif
+}
+
+static inline size_t last_lane(word m) {
+#if FAF_VECTOR_BYTES == 8
+  return (size_t)(63 - __builtin_clzll(m)) / 8;
+#else
+  return (size_t)(31 - __builtin_clz(m)) / 8;
+#endif
+}
+
+// Number of set lanes of a mask: each lane's bit becomes a 0/1 byte, and the
+// multiply sums them into the top byte (at most 8, so no overflow)
+static inline size_t count_lanes(word m) {
+  return (size_t)(((m >> 7) * ONES) >> ((W - 1) * 8));
+}
+
+/* ---- Scanning ---- */
+
+FAF_NO_ASAN FAF_NO_BUILTIN
+size_t faf_k_strlen(const char *s) {
+  const char *p = s;
+  for (; !aligned(p); ++p) {
+    if (*p == '\0')
+      return (size_t)(p - s);
+  }
+  for (;; p += W) {
+    word m = zero_lanes(load(p));
+    if (m)
+      return (size_t)(p - s) + first_lane(m);
+  }
+}
+
+FAF_NO_BUILTIN
+size_t faf_k_find_byte(const char *s, size_t n, char c) {
+  size_t i = 0;
+  for (; i < n && !aligned(s + i); ++i) {
+    if (s[i] == c)
+      return i;
+  }
+  word pat = bcast((unsigned char)c);
+  for (; i + W <= n; i += W) {
+    word m = zero_lanes(load(s + i) ^ pat);
+    if (m)
+      return i + first_lane(m);
+  }
+  for (; i < n; ++i) {
+    if (s[i] == c)
+      return i;
+  }
+  return n;
+}
+
+FAF_NO_BUILTIN
+size_t faf_k_rfind_byte(const char *s, size_t n, char c) {
+  size_t i = n; // everything at or after i has been searched
+  for (; i > 0 && !aligned(s + i); --i) {
+    if (s[i - 1] == c)
+      return i - 1;
+  }
+  word pat = bcast((unsigned char)c);
+  for (; i >= W; i -= W) {
+    word m = zero_lanes(load(s + i - W) ^ pat);
+    if (m)
+      return i - W + last_lane(m);
+  }
+  for (; i > 0; --i) {
+    if (s[i - 1] == c)
+      return i - 1;
+  }
+  return n;
+}
+
+FAF_NO_BUILTIN
+size_t faf_k_count_byte(const char *s, size_t n, char c) {
+  size_t i = 0, count = 0;
+  for (; i < n && !aligned(s + i); ++i)
+    count += s[i] == c;
+  word pat = bcast((unsigned char)c);
+  for (; i + W <= n; i += W)
+    count += count_lanes(zero_lanes(load(s + i) ^ pat));
+  for (; i < n; ++i)
+    count += s[i] == c;
+  return count;
+}
+
+FAF_NO_BUILTIN
+size_t faf_k_find_bytes(const char *s, size_t n, char c, size_t *pos,
+                        size_t max) {
+  size_t i = 0, k = 0;
+  if (max == 0)
+    return 0;
+  for (; i < n && !aligned(s + i); ++i) {
+    if (s[i] == c && (pos[k++] = i, k == max))
+      return k;
+  }
+  word pat = bcast((unsigned char)c);
+  for (; i + W <= n; i += W) {
+    for (word m = zero_lanes(load(s + i) ^ pat); m; m &= m - 1) {
+      pos[k++] = i + first_lane(m);
+      if (k == max)
+        return k;
+    }
+  }
+  for (; i < n; ++i) {
+    if (s[i] == c && (pos[k++] = i, k == max))
+      return k;
+  }
+  return k;
+}
+
+/* ---- Sets ---- */
+
+// Sets of up to this many bytes are tested a word at a time, one compare per
+// member; larger ones go through the bitmap a byte at a time (ref).
+#define SET_WORD_MAX 4
+
+// 0x80 in every lane whose membership in `set` equals `in`
+static inline word set_lanes(word x, const word *pats, int npats, bool in) {
+  word m = 0;
+  for (int j = 0; j < npats; ++j)
+    m |= zero_lanes(x ^ pats[j]);
+  return in ? m : ~m & HIGHS;
+}
+
+static int set_patterns(const faf_byteset *set, word pats[SET_WORD_MAX]) {
+  if (set->nchars > SET_WORD_MAX) // includes 0xFF: more than 16
+    return -1;
+  for (int j = 0; j < set->nchars; ++j)
+    pats[j] = bcast(set->chars[j]);
+  return set->nchars;
+}
+
+FAF_NO_BUILTIN
+size_t faf_k_find_set(const char *s, size_t n, const faf_byteset *set,
+                      bool in) {
+  word pats[SET_WORD_MAX];
+  int npats = set_patterns(set, pats);
+  if (npats < 0)
+    return faf_ref_find_set(s, n, set, in);
+  size_t i = 0;
+  for (; i < n && !aligned(s + i); ++i) {
+    if (faf_byteset_has(set, (unsigned char)s[i]) == in)
+      return i;
+  }
+  for (; i + W <= n; i += W) {
+    word m = set_lanes(load(s + i), pats, npats, in);
+    if (m)
+      return i + first_lane(m);
+  }
+  for (; i < n; ++i) {
+    if (faf_byteset_has(set, (unsigned char)s[i]) == in)
+      return i;
+  }
+  return n;
+}
+
+FAF_NO_BUILTIN
+size_t faf_k_rfind_set(const char *s, size_t n, const faf_byteset *set,
+                       bool in) {
+  word pats[SET_WORD_MAX];
+  int npats = set_patterns(set, pats);
+  if (npats < 0)
+    return faf_ref_rfind_set(s, n, set, in);
+  size_t i = n;
+  for (; i > 0 && !aligned(s + i); --i) {
+    if (faf_byteset_has(set, (unsigned char)s[i - 1]) == in)
+      return i - 1;
+  }
+  for (; i >= W; i -= W) {
+    word m = set_lanes(load(s + i - W), pats, npats, in);
+    if (m)
+      return i - W + last_lane(m);
+  }
+  for (; i > 0; --i) {
+    if (faf_byteset_has(set, (unsigned char)s[i - 1]) == in)
+      return i - 1;
+  }
+  return n;
+}
+
+/* ---- Comparing ---- */
+
+static inline unsigned char fold(unsigned char c) {
+  return (c >= 'A' && c <= 'Z') ? (unsigned char)(c + ('a' - 'A')) : c;
+}
+
+// Index of the first differing byte of a[0, n) and b[0, n), comparing
+// case-folded when `icase`. a is walked in aligned words; b generally has a
+// different alignment, so each of its words is shifted together from the two
+// aligned words it straddles. Every load holds at least one byte in range.
+static inline size_t mismatch(const char *a, const char *b, size_t n,
+                              bool icase) {
+  size_t i = 0;
+  for (; i < n && !aligned(a + i); ++i) {
+    unsigned char x = (unsigned char)a[i], y = (unsigned char)b[i];
+    if (icase ? fold(x) != fold(y) : x != y)
+      return i;
+  }
+  size_t off = (uintptr_t)(b + i) & (W - 1);
+  if (off == 0) {
+    for (; i + W <= n; i += W) {
+      word x = load(a + i), y = load(b + i);
+      word d = icase ? to_case(x, false) ^ to_case(y, false) : x ^ y;
+      if (d)
+        return i + first_lane(nonzero_lanes(d));
+    }
+  } else if (i + W <= n) {
+    const char *bw = b + i - off; // aligned word holding b[i]
+    word lo = load(bw);
+    for (; i + W <= n; i += W) {
+      bw += W;
+      word hi = load(bw);
+      word y = (lo >> (8 * off)) | (hi << (8 * (W - off)));
+      lo = hi;
+      word x = load(a + i);
+      word d = icase ? to_case(x, false) ^ to_case(y, false) : x ^ y;
+      if (d)
+        return i + first_lane(nonzero_lanes(d));
+    }
+  }
+  for (; i < n; ++i) {
+    unsigned char x = (unsigned char)a[i], y = (unsigned char)b[i];
+    if (icase ? fold(x) != fold(y) : x != y)
+      return i;
+  }
+  return n;
+}
+
+FAF_NO_BUILTIN
+size_t faf_k_mismatch(const char *a, const char *b, size_t n) {
+  return mismatch(a, b, n, false);
+}
+
+FAF_NO_BUILTIN
+size_t faf_k_mismatch_icase(const char *a, const char *b, size_t n) {
+  return mismatch(a, b, n, true);
+}
+
+/* ---- Transforms ---- */
+
+FAF_NO_BUILTIN
+void faf_k_ascii_case(char *dst, const char *src, size_t n, bool upper) {
+  size_t i = 0;
+  unsigned char lo = upper ? 'a' : 'A', hi = upper ? 'z' : 'Z';
+  for (; i < n && !aligned(src + i); ++i) {
+    unsigned char c = (unsigned char)src[i];
+    dst[i] = (char)(c >= lo && c <= hi ? c ^ 0x20 : c);
+  }
+  if (aligned(dst + i)) {
+    for (; i + W <= n; i += W)
+      *(word_alias *)(void *)(dst + i) = to_case(load(src + i), upper);
+  } else {
+    for (; i + W <= n; i += W) {
+      word x = to_case(load(src + i), upper);
+      __builtin_memcpy(dst + i, &x, W); // unaligned store
+    }
+  }
+  for (; i < n; ++i) {
+    unsigned char c = (unsigned char)src[i];
+    dst[i] = (char)(c >= lo && c <= hi ? c ^ 0x20 : c);
+  }
+}
+
+FAF_NO_BUILTIN
+size_t faf_k_ascii_prefix(const char *s, size_t n) {
+  size_t i = 0;
+  for (; i < n && !aligned(s + i); ++i) {
+    if ((unsigned char)s[i] >= 0x80)
+      return i;
+  }
+  for (; i + W <= n; i += W) {
+    word m = load(s + i) & HIGHS;
+    if (m)
+      return i + first_lane(m);
+  }
+  for (; i < n; ++i) {
+    if ((unsigned char)s[i] >= 0x80)
+      return i;
+  }
+  return n;
+}
+
+// A word-wide byte swap needs a bswap instruction, which not every CPU has
+// (some get a library call), so reverse stays a byte at a time.
+void faf_k_reverse(char *dst, const char *src, size_t n) {
+  faf_ref_reverse(dst, src, n);
+}
+
+#endif // FAF_BACKEND_SWAR
