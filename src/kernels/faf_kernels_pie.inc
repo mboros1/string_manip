@@ -4,11 +4,12 @@
 // PIE kernels for the ESP32-S3 (pie backend): the scanning kernels with its
 // 128-bit vector instructions. Everything else is the SWAR backend.
 //
-// PIE has no C intrinsics, so the vector work is assembly. find_byte and
-// strlen are whole functions in assembly (see there); elsewhere each asm
-// block is self-contained (it loads its own pattern and moves its results to
-// address registers), except count_byte's accumulator, see there. GCC never
-// uses the q registers; FreeRTOS saves them on task switches like the FPU.
+// PIE has no C intrinsics, so the vector work is assembly. find_byte,
+// find_bytes, strlen and mismatch are whole functions in assembly (see
+// there); elsewhere each asm block is self-contained (it loads its own
+// pattern and moves its results to address registers), except count_byte's
+// accumulator, see there. GCC never uses the q registers; FreeRTOS saves
+// them on task switches like the FPU.
 //
 // Shape: the SWAR kernels handle the first 64 bytes or so (to a 64-byte
 // aligned address) and the part after the last whole chunk; the asm scans
@@ -493,79 +494,173 @@ size_t faf_k_count_byte(const char *s, size_t n, char c) {
   return count + swar_count_byte(p, n - i, c);
 }
 
-// The 32 bytes at a (16-byte aligned) and at b compared: 0xFFFFFFFF iff
-// equal (the four words of the two equality masks, ANDed)
-static inline uint32_t equal_aligned(const char *a, const char *b) {
-  uint32_t w0, w1, w2, w3;
-  __asm__("ee.vld.128.ip  q0, %[a], 16\n\t"
-          "ee.vld.128.ip  q1, %[a], 16\n\t"
-          "ee.vld.128.ip  q2, %[b], 16\n\t"
-          "ee.vld.128.ip  q3, %[b], 16\n\t"
-          "ee.vcmp.eq.s8  q0, q0, q2\n\t"
-          "ee.vcmp.eq.s8  q1, q1, q3\n\t"
-          "ee.andq        q0, q0, q1\n\t"
-          "ee.movi.32.a   q0, %[w0], 0\n\t"
-          "ee.movi.32.a   q0, %[w1], 1\n\t"
-          "ee.movi.32.a   q0, %[w2], 2\n\t"
-          "ee.movi.32.a   q0, %[w3], 3"
-          : [a] "+r"(a), [b] "+r"(b), [w0] "=r"(w0), [w1] "=r"(w1),
-            [w2] "=r"(w2), [w3] "=r"(w3)
-          :
-          : "memory");
-  return w0 & w1 & w2 & w3;
-}
+// mismatch in assembly (a2 = a, a3 = b, a4 = n), the same shape as find_byte:
+// words over the lead (64+ bytes, to a 16-byte aligned a), PIE over 32-byte
+// steps, words over a differing step and over the tail; inputs shorter than
+// lead + one step are words only. When b is not word aligned, each of its
+// words is funnel-shifted from the two aligned words it straddles (SSA8L sets
+// the shift from b's address once, SRC shifts): every load holds a byte of b.
+// In the PIE loop an unaligned b is shifted from three 16-byte blocks the
+// same way (LD.128.USAR, SRC.Q).
+//
+// Registers: a2 a, a3 b, a4 n, a5 cursor in a, a6 cursor in b (kept in step
+// only where used, else recomputed), a7 end of the word range, a12 nonzero
+// once the scan may only end the search (short input, rescan, tail), a14 -1,
+// a8-a11/a13 temporaries.
+__asm__(
+    ".pushsection .text.faf_k_mismatch,\"ax\",@progbits\n"
+    ".align 4\n"
+    ".global faf_k_mismatch\n"
+    ".type faf_k_mismatch,@function\n"
+    "faf_k_mismatch:\n"
+    "  entry   a1, 32\n"
+    "  mov     a5, a2\n"
+    "  mov     a6, a3\n"
+    "  addi    a8, a2, 64\n"
+    "  neg     a8, a8\n"
+    "  extui   a8, a8, 0, 4\n"
+    "  addi    a8, a8, 64\n"             // head: a + head is 16-byte aligned
+    "  addi    a9, a8, 32\n"
+    "  add     a7, a2, a4\n"             // end
+    "  movi    a12, 1\n"
+    "  bltu    a4, a9, .Lmm_scan\n"      // short: words over everything
+    "  add     a7, a2, a8\n"             // lead end
+    "  movi    a12, 0\n"
+    // words over [a5, a7): difference -> .Lmm_found, else .Lmm_done
+    ".Lmm_scan:\n"
+    "  bgeu    a5, a7, .Lmm_done\n"
+    "  extui   a8, a5, 0, 2\n"
+    "  beqz    a8, .Lmm_words\n"
+    "  l8ui    a8, a5, 0\n"
+    "  l8ui    a9, a6, 0\n"
+    "  bne     a8, a9, .Lmm_found\n"
+    "  addi    a5, a5, 1\n"
+    "  addi    a6, a6, 1\n"
+    "  j       .Lmm_scan\n"
+    ".Lmm_words:\n"
+    "  sub     a8, a7, a5\n"
+    "  srli    a13, a8, 2\n"
+    "  beqz    a13, .Lmm_tail\n"
+    "  extui   a8, a6, 0, 2\n"
+    "  bnez    a8, .Lmm_uwords\n"
+    "  loop    a13, .Lmm_awords_end\n"
+    "  l32i    a8, a5, 0\n"
+    "  l32i    a9, a6, 0\n"
+    "  addi    a5, a5, 4\n"
+    "  addi    a6, a6, 4\n"
+    "  bne     a8, a9, .Lmm_whit\n"
+    ".Lmm_awords_end:\n"
+    "  j       .Lmm_tail\n"
+    ".Lmm_uwords:\n"
+    "  ssa8l   a6\n"
+    "  sub     a10, a6, a8\n"            // aligned word holding b's byte
+    "  l32i    a11, a10, 0\n"
+    "  loop    a13, .Lmm_uwords_end\n"
+    "  l32i    a9, a10, 4\n"
+    "  l32i    a8, a5, 0\n"
+    "  addi    a10, a10, 4\n"
+    "  src     a13, a9, a11\n"           // b's word: (hi:lo) >> 8 * offset
+    "  mov     a11, a9\n"
+    "  addi    a5, a5, 4\n"
+    "  bne     a8, a13, .Lmm_uwhit\n"
+    ".Lmm_uwords_end:\n"
+    ".Lmm_tail:\n"
+    "  sub     a8, a5, a2\n"
+    "  add     a6, a3, a8\n"
+    ".Lmm_tail_bytes:\n"
+    "  bgeu    a5, a7, .Lmm_done\n"
+    "  l8ui    a8, a5, 0\n"
+    "  l8ui    a9, a6, 0\n"
+    "  bne     a8, a9, .Lmm_found\n"
+    "  addi    a5, a5, 1\n"
+    "  addi    a6, a6, 1\n"
+    "  j       .Lmm_tail_bytes\n"
+    ".Lmm_uwhit:\n"
+    "  mov     a9, a13\n"
+    ".Lmm_whit:\n"                       // a8 != a9, the word before a5
+    "  addi    a5, a5, -4\n"
+    "  xor     a8, a8, a9\n"
+    "  neg     a9, a8\n"
+    "  and     a8, a8, a9\n"             // lowest set bit
+    "  nsau    a8, a8\n"
+    "  movi    a9, 31\n"
+    "  sub     a8, a9, a8\n"
+    "  srli    a8, a8, 3\n"
+    "  add     a5, a5, a8\n"
+    ".Lmm_found:\n"
+    "  sub     a2, a5, a2\n"
+    "  retw\n"
+    ".Lmm_none:\n"
+    "  mov     a2, a4\n"
+    "  retw\n"
+    ".Lmm_done:\n"
+    "  bnez    a12, .Lmm_none\n"
+    // PIE over 32-byte steps from a5 (16-byte aligned)
+    "  sub     a8, a5, a2\n"
+    "  add     a6, a3, a8\n"
+    "  add     a7, a2, a4\n"             // end, for the tail
+    "  sub     a8, a7, a5\n"
+    "  srli    a13, a8, 5\n"             // steps, at least 1
+    "  movi    a14, -1\n"
+    "  extui   a8, a6, 0, 4\n"
+    "  bnez    a8, .Lmm_vu\n"
+    "  loop    a13, .Lmm_va_end\n"
+    "  ee.vld.128.ip q0, a5, 16\n"
+    "  ee.vld.128.ip q1, a5, 16\n"
+    "  ee.vld.128.ip q2, a6, 16\n"
+    "  ee.vld.128.ip q3, a6, 16\n"
+    "  ee.vcmp.eq.s8 q0, q0, q2\n"
+    "  ee.vcmp.eq.s8 q1, q1, q3\n"
+    "  ee.andq q0, q0, q1\n"
+    "  ee.movi.32.a q0, a8, 0\n"
+    "  ee.movi.32.a q0, a9, 1\n"
+    "  ee.movi.32.a q0, a10, 2\n"
+    "  ee.movi.32.a q0, a11, 3\n"
+    "  and     a8, a8, a9\n"
+    "  and     a10, a10, a11\n"
+    "  and     a8, a8, a10\n"
+    "  bnall   a8, a14, .Lmm_vhit\n"
+    ".Lmm_va_end:\n"
+    "  j       .Lmm_vtail\n"
+    ".Lmm_vu:\n"
+    "  loop    a13, .Lmm_vu_end\n"
+    "  ee.ld.128.usar.ip q2, a6, 16\n"   // block holding b
+    "  ee.vld.128.ip q3, a6, 16\n"
+    "  ee.vld.128.ip q4, a6, 0\n"
+    "  ee.src.q q2, q2, q3\n"            // b[0, 16)
+    "  ee.src.q q3, q3, q4\n"            // b[16, 32)
+    "  ee.vld.128.ip q0, a5, 16\n"
+    "  ee.vld.128.ip q1, a5, 16\n"
+    "  ee.vcmp.eq.s8 q0, q0, q2\n"
+    "  ee.vcmp.eq.s8 q1, q1, q3\n"
+    "  ee.andq q0, q0, q1\n"
+    "  ee.movi.32.a q0, a8, 0\n"
+    "  ee.movi.32.a q0, a9, 1\n"
+    "  ee.movi.32.a q0, a10, 2\n"
+    "  ee.movi.32.a q0, a11, 3\n"
+    "  and     a8, a8, a9\n"
+    "  and     a10, a10, a11\n"
+    "  and     a8, a8, a10\n"
+    "  bnall   a8, a14, .Lmm_vhit\n"
+    ".Lmm_vu_end:\n"
+    ".Lmm_vtail:\n"
+    "  movi    a12, 1\n"                 // tail: a7 is the end
+    "  sub     a8, a5, a2\n"
+    "  add     a6, a3, a8\n"
+    "  j       .Lmm_scan\n"
+    ".Lmm_vhit:\n"                       // the step before a5 differs
+    "  addi    a5, a5, -32\n"
+    "  sub     a8, a5, a2\n"
+    "  add     a6, a3, a8\n"
+    "  addi    a7, a5, 32\n"
+    "  movi    a12, 1\n"
+    "  j       .Lmm_words\n"
+    ".size faf_k_mismatch, .-faf_k_mismatch\n"
+    ".popsection\n");
 
-// Same, with b not 16-byte aligned: its 32 bytes are shifted together from
-// the three aligned blocks they straddle (LD.128.USAR sets the byte shift from
-// b's address, SRC.Q applies it). All three blocks hold bytes of [b, b + 32).
-static inline uint32_t equal_unaligned(const char *a, const char *b) {
-  uint32_t w0, w1, w2, w3;
-  __asm__("ee.ld.128.usar.ip q2, %[b], 16\n\t" // block holding b
-          "ee.vld.128.ip     q3, %[b], 16\n\t"
-          "ee.vld.128.ip     q4, %[b], 0\n\t"
-          "ee.src.q          q2, q2, q3\n\t"    // b[0, 16)
-          "ee.src.q          q3, q3, q4\n\t"    // b[16, 32)
-          "ee.vld.128.ip     q0, %[a], 16\n\t"
-          "ee.vld.128.ip     q1, %[a], 16\n\t"
-          "ee.vcmp.eq.s8     q0, q0, q2\n\t"
-          "ee.vcmp.eq.s8     q1, q1, q3\n\t"
-          "ee.andq           q0, q0, q1\n\t"
-          "ee.movi.32.a      q0, %[w0], 0\n\t"
-          "ee.movi.32.a      q0, %[w1], 1\n\t"
-          "ee.movi.32.a      q0, %[w2], 2\n\t"
-          "ee.movi.32.a      q0, %[w3], 3"
-          : [a] "+r"(a), [b] "+r"(b), [w0] "=r"(w0), [w1] "=r"(w1),
-            [w2] "=r"(w2), [w3] "=r"(w3)
-          :
-          : "memory");
-  return w0 & w1 & w2 & w3;
-}
-
-// mismatch and ascii_prefix are still C: a small entry that runs the SWAR
-// lead inline, and an out-of-line function with the PIE loop (most calls end
-// in the lead, and a bigger function cost them ~5% in register setup)
-__attribute__((noinline)) FAF_NO_BUILTIN static size_t
-mismatch_long(const char *a, const char *b, size_t n, size_t i) {
-  bool b_aligned = (((uintptr_t)(b + i)) & 15) == 0;
-  for (size_t steps = (n - i) / 32; steps; --steps, i += 32) {
-    uint32_t eq = b_aligned ? equal_aligned(a + i, b + i)
-                            : equal_unaligned(a + i, b + i);
-    if (eq != 0xFFFFFFFFu)
-      return i + swar_mismatch(a + i, b + i, 32);
-  }
-  return i + swar_mismatch(a + i, b + i, n - i); // n when equal to the end
-}
-
-FAF_NO_BUILTIN
-size_t faf_k_mismatch(const char *a, const char *b, size_t n) {
-  // SWAR_LEAD bytes, then a aligned to a block
-  size_t head = SWAR_LEAD + (size_t)(-(uintptr_t)(a + SWAR_LEAD) & 15);
-  if (n < head + 32)
-    return swar_mismatch(a, b, n);
-  size_t r = swar_mismatch(a, b, head);
-  return r != head ? r : mismatch_long(a, b, n, head);
-}
-
+// ascii_prefix is still C: a small entry that runs the SWAR lead inline, and
+// an out-of-line function with the PIE loop (most calls end in the lead, and
+// a bigger function cost them ~5% in register setup)
 __attribute__((noinline)) FAF_NO_BUILTIN static size_t
 ascii_prefix_long(const char *s, size_t n, size_t head) {
   const char *p = s + head;
