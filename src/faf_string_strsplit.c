@@ -1,5 +1,5 @@
 #include "faf_string_strsplit.h"
-#include "faf_kernels.h"
+#include "kernels/faf_kernels.h"
 #include "faf_string_mem.h"
 
 // 2024-07-22:

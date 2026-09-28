@@ -3,7 +3,7 @@
 // ranges placed flush against unreadable guard pages on both sides (any read
 // outside the pages a range touches crashes the test).
 
-#include "faf_kernels.h"
+#include "kernels/faf_kernels.h"
 #include "faf_string_mem.h"
 #include "faf_test.h"
 

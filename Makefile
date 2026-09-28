@@ -18,31 +18,45 @@ BENCH_FLAGS ?= -O2
 #   EXTRA_FLAGS="-arch x86_64"         SSE2 backend on Apple Silicon (Rosetta)
 EXTRA_FLAGS ?=
 
-# simde is only used by the standalone experiment utilities, not the library
+# simde is only used by the standalone experiments, not the library
 UTIL_FLAGS = $(CFLAGS) -flax-vector-conversions
 ifneq ($(SIMDE_INCLUDE),)
   UTIL_FLAGS += -I$(SIMDE_INCLUDE)
 endif
 
 # Directories
-SRC_DIR = .
+SRC_DIR = src
+KERNEL_DIR = $(SRC_DIR)/kernels
+TEST_DIR = tests
+BENCH_DIR = bench
+TOOLS_DIR = tools
+EXP_DIR = experiments
 OBJ_DIR = obj
 BIN_DIR = bin
 
+# The library needs no include paths; everything else includes it via src/
+INCLUDES = -I$(SRC_DIR)
+
+# Sources are found by name in these directories; objects all go in OBJ_DIR
+vpath %.c $(SRC_DIR) $(KERNEL_DIR) $(TEST_DIR) $(TOOLS_DIR)
+
 # Library
-LIB_SRCS = faf_kernels_ref.c faf_kernels_simd.c faf_string.c \
-           faf_string_strlen.c faf_string_mem.c faf_string_cmp.c \
-           faf_string_concat.c faf_string_strsplit.c faf_string_case.c \
-           faf_string_search.c faf_string_view.c faf_string_build.c \
-           faf_string_parse.c faf_string_hash.c faf_string_sort.c
-LIB_OBJS = $(patsubst %.c,$(OBJ_DIR)/%.o,$(LIB_SRCS))
+LIB_SRCS = $(KERNEL_DIR)/faf_kernels_ref.c $(KERNEL_DIR)/faf_kernels_simd.c \
+           $(addprefix $(SRC_DIR)/, \
+             faf_string.c faf_string_strlen.c faf_string_mem.c \
+             faf_string_cmp.c faf_string_concat.c faf_string_strsplit.c \
+             faf_string_case.c faf_string_search.c faf_string_view.c \
+             faf_string_build.c faf_string_parse.c faf_string_hash.c \
+             faf_string_sort.c)
+LIB_HEADERS = $(wildcard $(SRC_DIR)/*.h $(KERNEL_DIR)/*.h)
+LIB_OBJS = $(patsubst %.c,$(OBJ_DIR)/%.o,$(notdir $(LIB_SRCS)))
 LIB = $(OBJ_DIR)/libfaf.a
 
 # Test files
-TEST_FILES = $(wildcard $(SRC_DIR)/test_*.c)
-TEST_TARGETS = $(patsubst $(SRC_DIR)/%.c,$(BIN_DIR)/%,$(TEST_FILES))
+TEST_FILES = $(wildcard $(TEST_DIR)/test_*.c)
+TEST_TARGETS = $(patsubst $(TEST_DIR)/%.c,$(BIN_DIR)/%,$(TEST_FILES))
 
-# Utility targets (standalone experiments, need simde)
+# Standalone experiments that are still built (need simde)
 UTIL_TARGETS = str_split_test str_len_test
 
 # Default target
@@ -52,14 +66,14 @@ $(BIN_DIR) $(OBJ_DIR):
 	mkdir -p $@
 
 # Object files; -MMD -MP keeps header dependencies up to date
-$(OBJ_DIR)/%.o: $(SRC_DIR)/%.c | $(OBJ_DIR)
-	$(CC) $(CFLAGS) $(EXTRA_FLAGS) -MMD -MP -c $< -o $@
+$(OBJ_DIR)/%.o: %.c | $(OBJ_DIR)
+	$(CC) $(CFLAGS) $(EXTRA_FLAGS) $(INCLUDES) -MMD -MP -c $< -o $@
 
-$(OBJ_DIR)/test_%.o: $(SRC_DIR)/test_%.c | $(OBJ_DIR)
-	$(CC) $(TEST_FLAGS) $(EXTRA_FLAGS) -MMD -MP -c $< -o $@
+$(OBJ_DIR)/test_%.o: test_%.c | $(OBJ_DIR)
+	$(CC) $(TEST_FLAGS) $(EXTRA_FLAGS) $(INCLUDES) -MMD -MP -c $< -o $@
 
-$(OBJ_DIR)/faf_test.o: $(SRC_DIR)/faf_test.c | $(OBJ_DIR)
-	$(CC) $(TEST_FLAGS) $(EXTRA_FLAGS) -MMD -MP -c $< -o $@
+$(OBJ_DIR)/faf_test.o: faf_test.c | $(OBJ_DIR)
+	$(CC) $(TEST_FLAGS) $(EXTRA_FLAGS) $(INCLUDES) -MMD -MP -c $< -o $@
 
 $(LIB): $(LIB_OBJS)
 	$(AR) rcs $@ $^
@@ -68,7 +82,7 @@ $(LIB): $(LIB_OBJS)
 $(BIN_DIR)/test_%: $(OBJ_DIR)/test_%.o $(OBJ_DIR)/faf_test.o $(LIB) | $(BIN_DIR)
 	$(CC) $(TEST_FLAGS) $(EXTRA_FLAGS) $^ -o $@
 
-$(UTIL_TARGETS): %: $(SRC_DIR)/%.c | $(BIN_DIR)
+$(UTIL_TARGETS): %: $(EXP_DIR)/%.c | $(BIN_DIR)
 	$(CC) $(UTIL_FLAGS) $< -o $(BIN_DIR)/$@
 
 generate_random_strings: $(OBJ_DIR)/generate_random_strings.o $(LIB) | $(BIN_DIR)
@@ -76,10 +90,11 @@ generate_random_strings: $(OBJ_DIR)/generate_random_strings.o $(LIB) | $(BIN_DIR
 
 # Benchmarks: library sources compiled together at BENCH_FLAGS.
 # `make bench BENCH_GROUPS="alloc io"` runs only those groups.
-BENCH_SRCS = bench_faf_string.c bench_common.c bench_alloc.c bench_io.c
+BENCH_SRCS = $(addprefix $(BENCH_DIR)/, \
+               bench_faf_string.c bench_common.c bench_alloc.c bench_io.c)
 BENCH_GROUPS ?=
-$(BIN_DIR)/bench_faf_string: $(BENCH_SRCS) bench.h $(LIB_SRCS) $(wildcard $(SRC_DIR)/faf*.h) | $(BIN_DIR)
-	$(CC) $(BENCH_FLAGS) $(EXTRA_FLAGS) $(BENCH_SRCS) $(LIB_SRCS) -o $@
+$(BIN_DIR)/bench_faf_string: $(BENCH_SRCS) $(BENCH_DIR)/bench.h $(LIB_SRCS) $(LIB_HEADERS) | $(BIN_DIR)
+	$(CC) $(BENCH_FLAGS) $(EXTRA_FLAGS) $(INCLUDES) $(BENCH_SRCS) $(LIB_SRCS) -o $@
 
 bench: $(BIN_DIR)/bench_faf_string
 	@$(BIN_DIR)/bench_faf_string $(BENCH_GROUPS)
@@ -116,8 +131,9 @@ FREESTANDING_ALLOWED = memcpy memset memmove memcmp bzero __bzero
 check_freestanding:
 	@mkdir -p $(FREESTANDING_DIR)
 	@for f in $(LIB_SRCS); do \
+		o=$$(basename $${f%.c}).o; \
 		$(CC) -O2 -ffreestanding -fno-stack-protector $(EXTRA_FLAGS) \
-			-c $$f -o $(FREESTANDING_DIR)/$${f%.c}.o || exit 1; \
+			-c $$f -o $(FREESTANDING_DIR)/$$o || exit 1; \
 	done
 	@nm -g --defined-only $(FREESTANDING_DIR)/*.o | awk 'NF == 3 {print $$3}' | \
 		sed 's/^_//' | sort -u > $(FREESTANDING_DIR)/defined.txt

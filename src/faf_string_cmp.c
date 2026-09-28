@@ -1,5 +1,5 @@
 #include "faf_string_cmp.h"
-#include "faf_kernels.h"
+#include "kernels/faf_kernels.h"
 
 int faf_string_cmp(faf_string str1, faf_string str2) {
   size_t len1 = faf_string_len(str1);

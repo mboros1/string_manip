@@ -31,6 +31,6 @@ jobs:
       run: |
         make check_backends
 
-    - name: Check the library needs no libc memory functions
+    - name: Check the library imports only memcpy/memset/memmove/memcmp
       run: |
         make check_freestanding

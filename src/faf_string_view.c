@@ -1,5 +1,5 @@
 #include "faf_string_view.h"
-#include "faf_kernels.h"
+#include "kernels/faf_kernels.h"
 
 faf_string faf_string_slice(faf_string str, size_t from, size_t to) {
   size_t n = faf_string_len(str);

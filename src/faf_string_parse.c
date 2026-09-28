@@ -1,5 +1,5 @@
 #include "faf_string_parse.h"
-#include "faf_kernels.h"
+#include "kernels/faf_kernels.h"
 #include "faf_string_build.h"
 
 static inline bool is_digit(char c) { return c >= '0' && c <= '9'; }

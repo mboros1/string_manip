@@ -3,6 +3,19 @@ simd operations with no dependencies on the standard library beyond `memcpy`, `m
 
 The library works on bytes: case functions are ASCII only, and `faf_string_utf8_valid` is the only UTF-8 aware function.
 
+## Layout
+
+| Directory | What's in it |
+|---|---|
+| `src/` | the library: sources and headers together |
+| `src/kernels/` | the per-architecture byte kernels (see Backends) |
+| `tests/` | one test program per module, and the test framework |
+| `bench/` | benchmarks (`make bench`) |
+| `tools/` | `gen_compile_commands.py`, random test data generators |
+| `experiments/` | standalone experiments, not part of the library (the simde ones, a C port of pdqsort) |
+
+To use the library, compile `src/*.c` and `src/kernels/*.c` (no include paths needed) and add `-Isrc` to your own code.
+
 ## Overview
 
 Include `faf.h` for everything, or the individual headers:
@@ -24,7 +37,7 @@ Functions that allocate take a `faf_region` and return `FAF_STRING_NONE` when th
 
 ### Backends
 
-All architecture specific code is a small set of byte kernels (`faf_kernels.h`), selected at compile time:
+All architecture specific code is a small set of byte kernels (`src/kernels/faf_kernels.h`), selected at compile time:
 
 | Backend | When |
 |---|---|
@@ -32,7 +45,7 @@ All architecture specific code is a small set of byte kernels (`faf_kernels.h`),
 | `neon` | AArch64, ARMv7 with NEON |
 | `ref` | anything else (portable scalar C), or forced with `-DFAF_BACKEND_REF` |
 
-The `ref` kernels are always compiled too, and every SIMD kernel is tested against them (`test_faf_kernels.c`). The library has no dependencies; simde is only used by the standalone `str_len_test` / `str_split_test` experiments.
+The `ref` kernels are always compiled too, and every SIMD kernel is tested against them (`tests/test_faf_kernels.c`). The library has no dependencies; simde is only used by the standalone `experiments/str_len_test.c` / `str_split_test.c`.
 
 #### Freestanding builds
 

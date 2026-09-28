@@ -1,5 +1,5 @@
 #include "faf_string_strlen.h"
-#include "faf_kernels.h"
+#include "kernels/faf_kernels.h"
 
 // 2024-07-22:
 // Using SIMD instructions, searches 16 bytes at a time.

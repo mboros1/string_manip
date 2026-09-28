@@ -17,6 +17,7 @@ import sys
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 STATE_FILE = os.path.join(ROOT, ".cache", "faf.json")
+TEST_DIR = os.path.join(ROOT, "tests")
 
 ACTIONS = [
     ("test", "build and run tests"),
@@ -84,7 +85,7 @@ so switching between them never reuses stale objects.
 # ---------------------------------------------------------------- tests
 
 def all_tests():
-    return sorted(f[len("test_"):-len(".c")] for f in os.listdir(ROOT)
+    return sorted(f[len("test_"):-len(".c")] for f in os.listdir(TEST_DIR)
                   if f.startswith("test_") and f.endswith(".c"))
 
 

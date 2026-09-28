@@ -6,7 +6,7 @@
 
 #include "bench.h"
 #include "faf.h"
-#include "faf_kernels.h"
+#include "kernels/faf_kernels.h"
 
 #include <ctype.h>
 #include <stdint.h>

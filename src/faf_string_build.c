@@ -1,5 +1,5 @@
 #include "faf_string_build.h"
-#include "faf_kernels.h"
+#include "kernels/faf_kernels.h"
 #include "faf_string_search.h"
 
 /* ---- Builder ---- */

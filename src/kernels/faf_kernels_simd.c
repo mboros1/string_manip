@@ -1,6 +1,5 @@
 #include "faf_kernels.h"
 #include "faf_simd.h"
-#include "faf_string_mem.h"
 
 // SIMD kernels, written once against faf_simd.h and compiled for whichever of
 // SSE2 / NEON is selected. With the ref backend, the kernels forward to the
