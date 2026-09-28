@@ -9,8 +9,10 @@
 
 #include <stdio.h>
 #include <string.h>
+#if FAF_TEST_HAVE_GUARD_PAGES
 #include <sys/mman.h>
 #include <unistd.h>
+#endif
 
 #define MAX_LEN 80
 
@@ -65,6 +67,15 @@ static int placements(size_t len, placement out[64]) {
 static void setup_pages(void) {
   if (page_lo)
     return;
+#if !FAF_TEST_HAVE_GUARD_PAGES
+  // No memory protection: the same layout in a plain buffer. The kernels are
+  // still compared with the reference at every placement; reads past the end
+  // just can't be caught.
+  static char mem[5 * 256];
+  page = 256;
+  page_lo = mem + page;
+  page_hi = mem + 3 * page;
+#else
   page = sysconf(_SC_PAGESIZE);
   char *mem = mmap(NULL, 5 * page, PROT_READ | PROT_WRITE,
                    MAP_PRIVATE | MAP_ANON, -1, 0);
@@ -73,9 +84,10 @@ static void setup_pages(void) {
   mprotect(mem + 4 * page, page, PROT_NONE);
   page_lo = mem + page;
   page_hi = mem + 3 * page;
+#endif
 }
 
-void test_find_count(void) {
+static void test_find_count(void) {
   setup_pages();
   failures = 0;
   const char targets[] = {'a', ',', '\0', (char)0xFF, 'q'};
@@ -110,7 +122,7 @@ void test_find_count(void) {
   ASSERT_INT_EQ(0, failures, "find/count kernels differ from reference");
 }
 
-void test_sets(void) {
+static void test_sets(void) {
   setup_pages();
   failures = 0;
   const char *sets[] = {"", ",", "a,", " \t\n\v\f\r", "aAzZ",
@@ -139,7 +151,7 @@ void test_sets(void) {
   ASSERT_INT_EQ(0, failures, "set kernels differ from reference");
 }
 
-void test_byteset(void) {
+static void test_byteset(void) {
   faf_byteset set;
   faf_byteset_init(&set, "abca", 4);
   ASSERT_INT_EQ(3, set.nchars, "Duplicates should be ignored");
@@ -153,7 +165,7 @@ void test_byteset(void) {
   ASSERT_TRUE(faf_byteset_has(&set, '0' + 39), "Large set membership");
 }
 
-void test_mismatch(void) {
+static void test_mismatch(void) {
   setup_pages();
   failures = 0;
   placement pa[64];
@@ -189,7 +201,7 @@ void test_mismatch(void) {
   ASSERT_INT_EQ(0, failures, "mismatch kernels differ from reference");
 }
 
-void test_strlen(void) {
+static void test_strlen(void) {
   setup_pages();
   failures = 0;
   for (size_t len = 0; len <= MAX_LEN; ++len) {
@@ -212,7 +224,7 @@ void test_strlen(void) {
 
 // Transforms: compare output buffers, and check nothing outside the
 // destination range is written.
-void test_transforms(void) {
+static void test_transforms(void) {
   failures = 0;
   char src[MAX_LEN + 32];
   char want[MAX_LEN + 64], got[MAX_LEN + 64];
@@ -258,16 +270,16 @@ void test_transforms(void) {
 }
 
 // Test case definitions
-test_case_t kernel_tests[] = {
+static test_case_t kernel_tests[] = {
     {"find_count", test_find_count}, {"sets", test_sets},
     {"byteset", test_byteset},       {"mismatch", test_mismatch},
     {"strlen", test_strlen},         {"transforms", test_transforms},
 };
 
 // Setup and teardown functions
-void kernel_setup(void) {}
+static void kernel_setup(void) {}
 
-void kernel_teardown(void) {}
+static void kernel_teardown(void) {}
 
 // Main function
 int main(int argc, char **argv) {

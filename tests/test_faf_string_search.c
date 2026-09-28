@@ -6,7 +6,7 @@
 
 #define S(lit) faf_string_init(lit)
 
-void test_eq_prefix_suffix(void) {
+static void test_eq_prefix_suffix(void) {
   ASSERT_TRUE(faf_string_eq(S("hello"), S("hello")), "eq");
   ASSERT_FALSE(faf_string_eq(S("hello"), S("hellO")), "eq differs");
   ASSERT_FALSE(faf_string_eq(S("hello"), S("hello!")), "eq length");
@@ -33,7 +33,7 @@ static size_t naive_find(const char *s, const char *sub, int last) {
   return found;
 }
 
-void test_find_rfind(void) {
+static void test_find_rfind(void) {
   const char *hay = "the cat sat on the mat with the other cat; cathedral catalog";
   const char *subs[] = {"cat", "the", "t", "catalog", "g", "dog", "cat;",
                         "the cat sat on the mat with the other cat; cathedral catalog",
@@ -55,7 +55,7 @@ void test_find_rfind(void) {
   ASSERT_FALSE(faf_string_contains(S(hay), S("dogs")), "contains none");
 }
 
-void test_count_find_any(void) {
+static void test_count_find_any(void) {
   ASSERT_INT_EQ(4, (int)faf_string_count(S("cat cat cat cathedral"), S("cat")), "count");
   ASSERT_INT_EQ(2, (int)faf_string_count(S("aaaa"), S("aa")), "count non-overlapping");
   ASSERT_INT_EQ(3, (int)faf_string_count(S("a,b,c,"), S(",")), "count char");
@@ -67,15 +67,15 @@ void test_count_find_any(void) {
 }
 
 // Test case definitions
-test_case_t search_tests[] = {
+static test_case_t search_tests[] = {
     {"eq_prefix_suffix", test_eq_prefix_suffix},
     {"find_rfind", test_find_rfind},
     {"count_find_any", test_count_find_any},
 };
 
-void search_setup(void) {}
+static void search_setup(void) {}
 
-void search_teardown(void) {}
+static void search_teardown(void) {}
 
 int main(int argc, char **argv) {
   test_suite_t suite = TEST_SUITE("Search", search_tests,

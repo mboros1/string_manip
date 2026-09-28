@@ -14,14 +14,29 @@
 //
 // Not thread-safe: acquire/release/reserve assume a single thread.
 
+// Build-time sizing: FAF_NPOOLS pools of FAF_POOL_SLOTS slots, so
+// FAF_NPOOLS * FAF_POOL_SLOTS * FAF_SLOT_BYTES bytes of static storage
+// (192 KB by default). A region can never hold more than one pool, so
+// FAF_POOL_SLOTS also caps the size of a single string. Small targets lower
+// these, e.g. -DFAF_NPOOLS=4 -DFAF_POOL_SLOTS=512 for 32 KB.
 #ifndef FAF_NPOOLS
 #define FAF_NPOOLS 12
 #endif
-
-// slots per pool
+#ifndef FAF_POOL_SLOTS
 #define FAF_POOL_SLOTS 1024
+#endif
 // bytes per slot, one SIMD register
 #define FAF_SLOT_BYTES 16
+
+// Placement of the pool storage, e.g. EXT_RAM_BSS_ATTR to put it in PSRAM on
+// an ESP32, or a section attribute for a linker script. Empty by default.
+#ifndef FAF_POOL_ATTR
+#define FAF_POOL_ATTR
+#endif
+
+_Static_assert(FAF_NPOOLS >= 1 && FAF_NPOOLS < UINT16_MAX,
+               "FAF_NPOOLS must be in [1, 65534]: pools are indexed by uint16_t");
+_Static_assert(FAF_POOL_SLOTS >= 1, "FAF_POOL_SLOTS must be at least 1");
 
 typedef struct {
   _Alignas(16) unsigned char bytes[FAF_SLOT_BYTES];
@@ -96,6 +111,18 @@ faf_string faf_string_copy(faf_region r, faf_string str);
 #define FAF_BUILTIN_MEMSET memset
 #endif
 
+// CPUs where unaligned 8- and 16-byte loads and stores are single, fast
+// instructions. Elsewhere (the original ESP32, most microcontrollers) each
+// unaligned fixed-size copy becomes a byte loop or a memcpy call, so the
+// inline paths below would only add code: they are left out.
+#if defined(__x86_64__) || defined(__i386__) || defined(_M_X64) ||             \
+    defined(_M_IX86) || defined(__aarch64__) || defined(_M_ARM64) ||           \
+    defined(__riscv_misaligned_fast)
+#define FAF_FAST_UNALIGNED 1
+#else
+#define FAF_FAST_UNALIGNED 0
+#endif
+
 // Short lengths, which dominate string work, are handled inline with a few
 // overlapping fixed-size copies (two k-byte pieces cover every length in
 // [k, 2k]); fixed-size builtin copies compile to plain loads and stores, 16
@@ -105,6 +132,9 @@ faf_string faf_string_copy(faf_region r, faf_string str);
 // Copy `n` bytes from `src` to `dst`. The ranges must not overlap.
 static inline void *faf_memcpy(void *restrict dst, const void *restrict src,
                                size_t n) {
+#if !FAF_FAST_UNALIGNED
+  return FAF_BUILTIN_MEMCPY(dst, src, n);
+#else
   unsigned char *d = (unsigned char *)dst;
   const unsigned char *s = (const unsigned char *)src;
   // restrict: the ranges don't overlap, so the overlapping pieces can be
@@ -134,10 +164,14 @@ static inline void *faf_memcpy(void *restrict dst, const void *restrict src,
     return FAF_BUILTIN_MEMCPY(dst, src, n);
   }
   return dst;
+#endif
 }
 
 // Set `n` bytes at `dst` to `(unsigned char)c`.
 static inline void *faf_memset(void *dst, int c, size_t n) {
+#if !FAF_FAST_UNALIGNED
+  return FAF_BUILTIN_MEMSET(dst, c, n);
+#else
   unsigned char *d = (unsigned char *)dst;
   if (n > 16)
     return FAF_BUILTIN_MEMSET(dst, c, n);
@@ -153,6 +187,7 @@ static inline void *faf_memset(void *dst, int c, size_t n) {
     d[0] = d[n / 2] = d[n - 1] = (unsigned char)c;
   }
   return dst;
+#endif
 }
 
 // True if [p, p + n) lies inside pool storage, i.e. is owned by some region.

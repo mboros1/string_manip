@@ -16,7 +16,7 @@ static uint32_t rng(void) {
   return (uint32_t)rng_state;
 }
 
-void test_hash_basics(void) {
+static void test_hash_basics(void) {
   ASSERT_TRUE(faf_string_hash(S("hello")) == faf_string_hash(S("hello")), "deterministic");
   ASSERT_TRUE(faf_string_hash(S("hello")) != faf_string_hash(S("hellp")), "differs");
   ASSERT_TRUE(faf_string_hash(S("")) != faf_string_hash(faf_string_init_n("\0", 1)),
@@ -28,7 +28,7 @@ void test_hash_basics(void) {
   ASSERT_TRUE(faf_string_hash(S("hello")) == 0xa0b13b03c8b90939ull, "pinned hash value");
 }
 
-void test_hash_avalanche(void) {
+static void test_hash_avalanche(void) {
   // flipping any one input bit should flip about half the output bits
   for (size_t len = 1; len <= 24; len += 7) {
     unsigned char buf[24];
@@ -51,7 +51,7 @@ void test_hash_avalanche(void) {
   }
 }
 
-void test_sort_chars(void) {
+static void test_sort_chars(void) {
   faf_region r = faf_region_acquire();
   ASSERT_STR_EQ("aaabnn", faf_string_sort_chars(r, S("banana")).start, "sort_chars");
   ASSERT_STR_EQ("", faf_string_sort_chars(r, S("")).start, "sort_chars empty");
@@ -64,7 +64,7 @@ static int by_cmp(const void *a, const void *b) {
   return faf_string_cmp(*(const faf_string *)a, *(const faf_string *)b);
 }
 
-void test_arr_sort(void) {
+static void test_arr_sort(void) {
   static char pool[4096 * 8];
   static faf_string items[4096], want[4096];
   const size_t sizes[] = {0, 1, 2, 3, 16, 17, 100, 1000, 4096};
@@ -97,16 +97,16 @@ void test_arr_sort(void) {
 }
 
 // Test case definitions
-test_case_t hash_sort_tests[] = {
+static test_case_t hash_sort_tests[] = {
     {"hash_basics", test_hash_basics},
     {"hash_avalanche", test_hash_avalanche},
     {"sort_chars", test_sort_chars},
     {"arr_sort", test_arr_sort},
 };
 
-void hash_sort_setup(void) {}
+static void hash_sort_setup(void) {}
 
-void hash_sort_teardown(void) {}
+static void hash_sort_teardown(void) {}
 
 int main(int argc, char **argv) {
   test_suite_t suite = TEST_SUITE("HashSort", hash_sort_tests,

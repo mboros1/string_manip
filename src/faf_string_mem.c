@@ -19,7 +19,7 @@
 
 #define STORAGE_SLOTS (FAF_NPOOLS * FAF_POOL_SLOTS)
 
-static faf_slot storage[STORAGE_SLOTS];
+static FAF_POOL_ATTR faf_slot storage[STORAGE_SLOTS];
 
 static inline faf_slot *pool_base(uint16_t pool) {
   return &storage[(size_t)pool * FAF_POOL_SLOTS];

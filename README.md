@@ -10,6 +10,7 @@ The library works on bytes: case functions are ASCII only, and `faf_string_utf8_
 | `src/` | the library: sources and headers together |
 | `src/kernels/` | the per-architecture byte kernels (see Backends) |
 | `tests/` | one test program per module, and the test framework |
+| `tests/esp32/` | an ESP-IDF app that runs every test suite on an ESP32 (`make esp32_test`) |
 | `bench/` | benchmarks (`make bench`) |
 | `tools/` | `gen_compile_commands.py`, random test data generators |
 | `experiments/` | standalone experiments, not part of the library (the simde ones, a C port of pdqsort) |
@@ -34,6 +35,10 @@ Include `faf.h` for everything, or the individual headers:
 | `faf_string_hash.h`, `faf_string_sort.h` | 64 bit `hash`, `sort_chars`, `arr_sort` |
 
 Functions that allocate take a `faf_region` and return `FAF_STRING_NONE` when the region is out of space. Everything allocated from a region is freed at once by `faf_region_release`.
+
+### Memory configuration
+
+All memory is static: `FAF_NPOOLS` pools of `FAF_POOL_SLOTS` 16-byte slots, 12 × 1024 slots (192 KB) by default. A region is one pool, so `FAF_POOL_SLOTS` also caps the size of any single result. Both are set at build time, e.g. `-DFAF_NPOOLS=4 -DFAF_POOL_SLOTS=512` for 32 KB on a microcontroller. `FAF_POOL_ATTR` places the pool storage, e.g. `-DFAF_POOL_ATTR=EXT_RAM_BSS_ATTR` for PSRAM on an ESP32.
 
 ### Backends
 
@@ -164,6 +169,13 @@ make check_backends
 # Check the library, built freestanding, imports nothing but memcpy/memset/memmove/memcmp
 make check_freestanding
 
+# Run the tests with small pools (2 x 1 KB), like a microcontroller build
+make check_small
+
+# Run the tests on an ESP32 over serial (needs ESP-IDF, default ~/esp/esp-idf-v6.1)
+make esp32_test                                          # original ESP32
+make esp32_test IDF_TARGET=esp32s3 ESPPORT=/dev/cu.usbmodem101
+
 # Build (at -O2) and run the benchmarks
 make bench
 
@@ -173,6 +185,8 @@ make bench BENCH_GROUPS="alloc io"
 # Any of the above for another backend or architecture, e.g. SSE2 on Apple Silicon
 make OBJ_DIR=obj/x86 BIN_DIR=bin/x86 EXTRA_FLAGS="-arch x86_64" all_tests
 ```
+
+Tests adapt to the configured pool sizes. A test that needs more room than the build has, or guard pages (`mmap`) that a microcontroller lacks, declares it with `TEST_REQUIRE(condition, reason)` and is reported as SKIPPED with the reason instead of failing.
 
 ### Cleaning
 

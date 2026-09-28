@@ -45,8 +45,9 @@ BENCH_GROUPS = [
     ("kernels", "SIMD kernels vs scalar reference vs libc"),
 ]
 CHECKS = [
-    ("all", "both checks below"),
+    ("all", "every check below"),
     ("backends", "rerun all tests on the scalar backend"),
+    ("small", "rerun all tests with small pools, like a microcontroller"),
     ("freestanding", "library imports only memcpy/memset/memmove/memcmp"),
 ]
 
@@ -149,6 +150,8 @@ def make_command(choices, make_args=()):
         check = choices.get("check", "all")
         if check in ("all", "backends"):
             cmd.append("check_backends")
+        if check in ("all", "small"):
+            cmd.append("check_small")
         if check in ("all", "freestanding"):
             cmd.append("check_freestanding")
     elif action == "clean":

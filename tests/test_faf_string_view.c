@@ -10,7 +10,7 @@ static int view_is(faf_string v, const char *expected) {
   return faf_string_eq(v, S(expected));
 }
 
-void test_slice(void) {
+static void test_slice(void) {
   faf_string s = S("hello world");
   ASSERT_TRUE(view_is(faf_string_slice(s, 0, 5), "hello"), "slice");
   ASSERT_TRUE(view_is(faf_string_slice(s, 6, 100), "world"), "slice clamps end");
@@ -19,7 +19,7 @@ void test_slice(void) {
   ASSERT_TRUE(faf_string_slice(s, 2, 4).start == s.start + 2, "slice is a view");
 }
 
-void test_trim(void) {
+static void test_trim(void) {
   ASSERT_TRUE(view_is(faf_string_trim(S("  \t hello world \r\n")), "hello world"), "trim");
   ASSERT_TRUE(view_is(faf_string_ltrim(S("  hi  ")), "hi  "), "ltrim");
   ASSERT_TRUE(view_is(faf_string_rtrim(S("  hi  ")), "  hi"), "rtrim");
@@ -33,7 +33,7 @@ void test_trim(void) {
               "trim long");
 }
 
-void test_next_token(void) {
+static void test_next_token(void) {
   const char *expected[] = {"a", "", "bb", "ccc", ""};
   faf_string rest = S("a,,bb,ccc,"), tok;
   int i = 0;
@@ -61,7 +61,7 @@ void test_next_token(void) {
   faf_region_release(r);
 }
 
-void test_split_once(void) {
+static void test_split_once(void) {
   faf_string left, right;
   ASSERT_TRUE(faf_string_split_once(S("key=value=more"), '=', &left, &right), "found");
   ASSERT_TRUE(view_is(left, "key") && view_is(right, "value=more"), "split_once parts");
@@ -72,16 +72,16 @@ void test_split_once(void) {
 }
 
 // Test case definitions
-test_case_t view_tests[] = {
+static test_case_t view_tests[] = {
     {"slice", test_slice},
     {"trim", test_trim},
     {"next_token", test_next_token},
     {"split_once", test_split_once},
 };
 
-void view_setup(void) {}
+static void view_setup(void) {}
 
-void view_teardown(void) {}
+static void view_teardown(void) {}
 
 int main(int argc, char **argv) {
   test_suite_t suite = TEST_SUITE("View", view_tests,

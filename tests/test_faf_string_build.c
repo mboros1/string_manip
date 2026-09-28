@@ -17,7 +17,7 @@ static int terminated(faf_string s) {
   return 1;
 }
 
-void test_builder_in_place(void) {
+static void test_builder_in_place(void) {
   faf_region r = faf_region_acquire();
   faf_builder b = faf_builder_init(r);
   char expected[2048] = {0};
@@ -41,7 +41,7 @@ void test_builder_in_place(void) {
 
 // Near the end of the region doubling doesn't fit, but growing in place by
 // just enough still does.
-void test_builder_near_full(void) {
+static void test_builder_near_full(void) {
   faf_region r = faf_region_acquire();
   faf_reserve(r, FAF_POOL_SLOTS - 10); // leave 10 slots
   faf_builder b = faf_builder_init(r);
@@ -61,7 +61,7 @@ void test_builder_near_full(void) {
   faf_region_release(r);
 }
 
-void test_builder_moves(void) {
+static void test_builder_moves(void) {
   faf_region r = faf_region_acquire();
   faf_builder b = faf_builder_init(r);
   faf_builder_append(&b, S("first part, "));
@@ -75,7 +75,7 @@ void test_builder_moves(void) {
   faf_region_release(r);
 }
 
-void test_builder_numbers(void) {
+static void test_builder_numbers(void) {
   faf_region r = faf_region_acquire();
   faf_builder b = faf_builder_init(r);
   faf_builder_append_i64(&b, INT64_MIN);
@@ -91,7 +91,7 @@ void test_builder_numbers(void) {
   faf_region_release(r);
 }
 
-void test_builder_out_of_space(void) {
+static void test_builder_out_of_space(void) {
   faf_region r = faf_region_acquire();
   faf_reserve(r, FAF_POOL_SLOTS - 2);
   faf_builder b = faf_builder_init(r);
@@ -103,7 +103,7 @@ void test_builder_out_of_space(void) {
   faf_region_release(r);
 }
 
-void test_join(void) {
+static void test_join(void) {
   faf_region r = faf_region_acquire();
   faf_string_arr parts = faf_string_split(r, S("a,bb,,ccc"), ',');
   faf_string joined = faf_string_join(r, parts, S(" | "));
@@ -116,7 +116,7 @@ void test_join(void) {
   faf_region_release(r);
 }
 
-void test_repeat_pad_reverse(void) {
+static void test_repeat_pad_reverse(void) {
   faf_region r = faf_region_acquire();
   ASSERT_STR_EQ("abcabcabc", faf_string_repeat(r, S("abc"), 3).start, "repeat");
   ASSERT_STR_EQ("", faf_string_repeat(r, S("abc"), 0).start, "repeat zero");
@@ -132,19 +132,22 @@ void test_repeat_pad_reverse(void) {
   ASSERT_STR_EQ("toolong", faf_string_pad_left(r, S("toolong"), 3, ' ').start,
                 "pad shorter width");
 
+  faf_region_release(r);
+
   const char *fwd = "0123456789abcdefghijklmnopqrstuvwxyz!";
   char rev[64];
   for (size_t len = 0; len <= strlen(fwd); ++len) {
     for (size_t i = 0; i < len; ++i)
       rev[i] = fwd[len - 1 - i];
     rev[len] = '\0';
+    r = faf_region_acquire(); // a region per length: fits pools of any size
     faf_string out = faf_string_reverse(r, faf_string_init_n(fwd, len));
     ASSERT_STR_EQ(rev, out.start, "reverse");
+    faf_region_release(r);
   }
-  faf_region_release(r);
 }
 
-void test_replace(void) {
+static void test_replace(void) {
   faf_region r = faf_region_acquire();
   ASSERT_STR_EQ("a-b-c", faf_string_replace(r, S("a, b, c"), S(", "), S("-")).start,
                 "replace shrink");
@@ -161,7 +164,7 @@ void test_replace(void) {
   faf_region_release(r);
 }
 
-void test_format(void) {
+static void test_format(void) {
   faf_region r = faf_region_acquire();
   faf_string name = S("world");
   faf_string s = faf_string_format(r, "hello %S, %s! %d%% %i %u %x %c", name, "C str",
@@ -184,7 +187,7 @@ void test_format(void) {
 }
 
 // Test case definitions
-test_case_t build_tests[] = {
+static test_case_t build_tests[] = {
     {"builder_in_place", test_builder_in_place},
     {"builder_near_full", test_builder_near_full},
     {"builder_moves", test_builder_moves},
@@ -196,9 +199,9 @@ test_case_t build_tests[] = {
     {"format", test_format},
 };
 
-void build_setup(void) {}
+static void build_setup(void) {}
 
-void build_teardown(void) {}
+static void build_teardown(void) {}
 
 int main(int argc, char **argv) {
   test_suite_t suite = TEST_SUITE("Build", build_tests,

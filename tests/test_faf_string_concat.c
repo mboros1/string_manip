@@ -7,8 +7,8 @@
 #include <stdio.h>
 #include <string.h>
 
-const char *str1 = "hello,world";
-void test_str1(void) {
+static const char *str1 = "hello,world";
+static void test_str1(void) {
   printf("Testing string 1...\n");
   faf_region r = faf_region_acquire();
   faf_string str = faf_string_init(str1);
@@ -22,14 +22,15 @@ void test_str1(void) {
   faf_region_release(r);
 }
 
-void test_lengths(void) {
+static void test_lengths(void) {
   // every split of lengths around the 16 byte boundaries, from both caller
   // memory and pool storage
   const char *src = "0123456789abcdefghijklmnopqrstuvwxyzABCDEF";
   char expected[128];
-  faf_region r = faf_region_acquire();
   for (size_t la = 0; la <= 33; ++la) {
     for (size_t lb = 0; lb <= 33; ++lb) {
+      // a region per case, so this fits pools of any size
+      faf_region r = faf_region_acquire();
       faf_string a = faf_string_init_n(src, la);
       faf_string b = faf_string_init_n(src + 5, lb);
       memcpy(expected, a.start, la);
@@ -44,15 +45,12 @@ void test_lengths(void) {
       ASSERT_STR_EQ(expected, c2.start, "Concat from pool storage incorrect");
       ASSERT_INT_EQ((int)(la + lb), (int)faf_string_len(c2),
                     "Concat length incorrect");
+      faf_region_release(r);
     }
-    // plenty of room per round, but don't run out
-    faf_region_release(r);
-    r = faf_region_acquire();
   }
-  faf_region_release(r);
 }
 
-void test_out_of_space(void) {
+static void test_out_of_space(void) {
   faf_region r = faf_region_acquire();
   faf_reserve(r, FAF_POOL_SLOTS - 1);
   faf_string a = faf_string_init("0123456789");
@@ -62,18 +60,18 @@ void test_out_of_space(void) {
 }
 
 // Test case definitions
-test_case_t string_concat_tests[] = {
+static test_case_t string_concat_tests[] = {
     {"basic_concat", test_str1},
     {"lengths", test_lengths},
     {"out_of_space", test_out_of_space},
 };
 
 // Setup and teardown functions
-void string_concat_setup(void) {
+static void string_concat_setup(void) {
     // Any setup code needed before each test
 }
 
-void string_concat_teardown(void) {
+static void string_concat_teardown(void) {
     // Any cleanup code needed after each test
 }
 

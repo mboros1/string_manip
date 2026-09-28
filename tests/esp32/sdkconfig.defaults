@@ -1,0 +1,4 @@
+# Some tests keep a few KB on the stack
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=16384
+# The suites run back to back on the main task without yielding
+CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU0=n

@@ -122,6 +122,24 @@ check_backends:
 	$(MAKE) OBJ_DIR=$(OBJ_DIR)/ref BIN_DIR=$(BIN_DIR)/ref \
 		EXTRA_FLAGS="$(EXTRA_FLAGS) -DFAF_BACKEND_REF" all_tests
 
+# Run the tests again with small pools, like a microcontroller build. Tests
+# that need more room than that skip themselves (TEST_REQUIRE); none may fail.
+SMALL_POOLS ?= -DFAF_NPOOLS=2 -DFAF_POOL_SLOTS=64
+check_small:
+	$(MAKE) OBJ_DIR=$(OBJ_DIR)/small BIN_DIR=$(BIN_DIR)/small \
+		EXTRA_FLAGS="$(EXTRA_FLAGS) $(SMALL_POOLS)" all_tests
+
+# Build the tests for an ESP32, flash them and collect the results over
+# serial (tests/esp32/). Needs ESP-IDF; IDF_TARGET picks the chip (esp32,
+# esp32s3, ...) and ESPPORT the serial port when more than one is connected.
+IDF_PATH ?= $(HOME)/esp/esp-idf-v6.1
+IDF_TARGET ?= esp32
+ESPPORT ?=
+esp32_test:
+	@bash -c '. "$(IDF_PATH)/export.sh" >/dev/null && \
+		python tests/esp32/run.py --target $(IDF_TARGET) \
+			$(if $(ESPPORT),--port $(ESPPORT))'
+
 # Built freestanding, the library may import only memcpy, memset, memmove and
 # memcmp, which GCC and Clang require from every environment. Apple targets
 # also lower memset(p, 0, n) to bzero (__bzero on x86_64), which every Apple
@@ -170,4 +188,6 @@ clean:
 -include $(wildcard $(OBJ_DIR)/*.d)
 
 .PHONY: all clean all_tests test test_framework test_explorer config bench \
-        check_backends check_freestanding generate_random_strings $(UTIL_TARGETS)
+        check_backends check_small check_freestanding esp32_test \
+        generate_random_strings \
+        $(UTIL_TARGETS)

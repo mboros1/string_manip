@@ -31,6 +31,10 @@ jobs:
       run: |
         make check_backends
 
+    - name: Run tests with small pools
+      run: |
+        make check_small
+
     - name: Check the library imports only memcpy/memset/memmove/memcmp
       run: |
         make check_freestanding

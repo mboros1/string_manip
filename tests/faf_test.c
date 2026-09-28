@@ -35,6 +35,8 @@ static test_stats_t stats = {0};
 // Did the current test fail an assertion? Set by the test_assert_*
 // functions, reset by run_one() before each test.
 static bool test_failed = false;
+// Did the current test skip itself with TEST_REQUIRE?
+static bool test_skipped = false;
 
 // Register a test suite
 void register_test_suite(test_suite_t suite) {
@@ -44,6 +46,10 @@ void register_test_suite(test_suite_t suite) {
     }
     
     test_suites[suite_count++] = suite;
+}
+
+void clear_test_suites(void) {
+    suite_count = 0;
 }
 
 // Helper functions for test execution
@@ -56,6 +62,11 @@ static void print_test_success(const char* suite_name, const char* test_name, do
            suite_name, test_name, duration);
 }
 
+static void print_test_skipped(const char* suite_name, const char* test_name) {
+    printf(ANSI_COLOR_YELLOW "[  SKIPPED ] " ANSI_COLOR_RESET "%s.%s\n",
+           suite_name, test_name);
+}
+
 static void print_test_failure(const char* suite_name, const char* test_name, double duration) {
     printf(ANSI_COLOR_RED "[  FAILED  ] " ANSI_COLOR_RESET "%s.%s (%.2f ms)\n", 
            suite_name, test_name, duration);
@@ -66,6 +77,7 @@ static void print_test_failure(const char* suite_name, const char* test_name, do
 // all of them judge a test the same way.
 static bool run_one(const test_suite_t* suite, const test_case_t* test) {
     test_failed = false;
+    test_skipped = false;
 
     if (suite->setup != NULL) {
         suite->setup();
@@ -80,6 +92,9 @@ static bool run_one(const test_suite_t* suite, const test_case_t* test) {
     if (test_failed) {
         print_test_failure(suite->name, test->name, duration);
         stats.failed_tests++;
+    } else if (test_skipped) {
+        print_test_skipped(suite->name, test->name);
+        stats.skipped_tests++;
     } else {
         print_test_success(suite->name, test->name, duration);
         stats.passed_tests++;
@@ -179,6 +194,12 @@ int run_all_tests(void) {
 }
 
 // Assertion implementations
+void test_skip(const char* file, int line, const char* reason) {
+    test_skipped = true;
+    printf(ANSI_COLOR_YELLOW "    Skipped at %s:%d: %s\n" ANSI_COLOR_RESET,
+           file, line, reason ? reason : "");
+}
+
 void test_assert_true(int condition, const char* file, int line, const char* message) {
     if (!condition) {
         test_failed = true;
@@ -192,12 +213,16 @@ void test_assert_true(int condition, const char* file, int line, const char* mes
 
 void test_assert_str_eq(const char* expected, const char* actual, 
                         const char* file, int line, const char* message) {
-    if (strcmp(expected, actual) != 0) {
+    // NULL (e.g. a failed allocation's FAF_STRING_NONE) fails instead of
+    // crashing the whole test program in strcmp
+    bool equal = expected && actual ? strcmp(expected, actual) == 0
+                                    : expected == actual;
+    if (!equal) {
         test_failed = true;
         
         printf(ANSI_COLOR_RED "    String equality assertion failed at %s:%d\n" ANSI_COLOR_RESET, file, line);
-        printf("        Expected: \"%s\"\n", expected);
-        printf("        Actual:   \"%s\"\n", actual);
+        printf("        Expected: %s%s%s\n", expected ? "\"" : "", expected ? expected : "NULL", expected ? "\"" : "");
+        printf("        Actual:   %s%s%s\n", actual ? "\"" : "", actual ? actual : "NULL", actual ? "\"" : "");
         if (message && *message) {
             printf("    Message: %s\n", message);
         }

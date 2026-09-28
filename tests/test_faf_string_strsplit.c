@@ -7,8 +7,18 @@
 #include <stdio.h>
 #include <string.h>
 
-const char *str1 = "hello,world";
-void test_str1(void) {
+// Slots faf_string_split reserves for `count` tokens: the token array.
+static size_t split_slots(int count) {
+  return ((size_t)count * sizeof(faf_string) + FAF_SLOT_BYTES - 1) /
+         FAF_SLOT_BYTES;
+}
+
+// The most slots any one split_cases entry needs, optionally with a copy of
+// its source in the same region.
+static size_t split_cases_max_slots(bool copy_source);
+
+static const char *str1 = "hello,world";
+static void test_str1(void) {
   printf("Testing string 1...\n");
   faf_region r = faf_region_acquire();
   faf_string str = faf_string_init(str1);
@@ -21,8 +31,8 @@ void test_str1(void) {
   faf_region_release(r);
 }
 
-const char *str2 = "hello,world,today";
-void test_str2(void) {
+static const char *str2 = "hello,world,today";
+static void test_str2(void) {
   printf("Testing string 2...\n");
   faf_region r = faf_region_acquire();
   faf_string str = faf_string_init(str2);
@@ -35,8 +45,8 @@ void test_str2(void) {
   faf_region_release(r);
 }
 
-const char *str3 = "";
-void test_str3(void) {
+static const char *str3 = "";
+static void test_str3(void) {
   printf("Testing string 3...\n");
   faf_region r = faf_region_acquire();
   faf_string str = faf_string_init(str3);
@@ -49,8 +59,8 @@ void test_str3(void) {
   faf_region_release(r);
 }
 
-const char *str4 = ",,,,,,,,,,,";
-void test_str4(void) {
+static const char *str4 = ",,,,,,,,,,,";
+static void test_str4(void) {
   printf("Testing string 4...\n");
   faf_region r = faf_region_acquire();
   faf_string str = faf_string_init(str4);
@@ -63,7 +73,7 @@ void test_str4(void) {
   faf_region_release(r);
 }
 
-const char *str5 =
+static const char *str5 =
     "LoJxoUH9kIUGg8EhZvChVx5tKlagaCBX6cGDKR7aDNWW2XMl4mhOxxM2QG4Mex0fXjfHuTFf"
     "1gdP5v6CjbUHgePZgwtZISwIrmEjwhgBGYwSQuffc2uEgW5tP4eWZURC19apUQaUNdfeVPBB"
     "Lx1yAnu4i0P4G7lnWwaoKk3hGoaM3sM1YAv4WZM1UGjcwPybJZhWn8r8Uabal2usCCODlBDE"
@@ -92,8 +102,10 @@ const char *str5 =
     "nKdxvoSApDIAJkZ2Gsw3Wsm1cwLVE6ts98OwyFHlTD7fBTWI28v5LrqZe16KSaIqIrT5y1pe"
     "sA59h1QawuvzJu9Csj96yE2OffYYbu7ybj6z2WGPB3HRJrK7gr8aN7dQoYtxo5ZQ4MBBvyMJ"
     "KI0s737pWcAPRNyCAUUTRPssag9wmvxpMUzdTCO7pQ93";
-void test_str5(void) {
+static void test_str5(void) {
   printf("Testing string 5...\n");
+  TEST_REQUIRE(split_slots(36) <= FAF_POOL_SLOTS,
+               "36 tokens need a bigger region (FAF_POOL_SLOTS)");
   faf_region r = faf_region_acquire();
   faf_string str = faf_string_init(str5);
 
@@ -105,8 +117,8 @@ void test_str5(void) {
   faf_region_release(r);
 }
 
-const char *str6 = ",,asdf,asfasdfg,,,";
-void test_str6(void) {
+static const char *str6 = ",,asdf,asfasdfg,,,";
+static void test_str6(void) {
   printf("Testing string 6...\n");
   faf_region r = faf_region_acquire();
   faf_string str = faf_string_init(str6);
@@ -119,8 +131,8 @@ void test_str6(void) {
   faf_region_release(r);
 }
 
-const char *str7 = "1234567890123456,123";
-void test_str7(void) {
+static const char *str7 = "1234567890123456,123";
+static void test_str7(void) {
   printf("Testing string 7...\n");
   faf_region r = faf_region_acquire();
   faf_string str = faf_string_init(str7);
@@ -138,7 +150,7 @@ void test_str7(void) {
 }
 
 // Every test string, with its separator and expected token count.
-struct split_case {
+static struct split_case {
   const char *str;
   char tok;
   int count;
@@ -163,34 +175,52 @@ static void check_tokens(faf_string src, faf_string_arr arr, char tok,
     }
     expect_start = t->end + 1;
   }
-  ASSERT_TRUE((arr.end - 1)->end == src.end, "Last token end incorrect");
+  if (arr.end > arr.start) // an empty (failed) result has no last token
+    ASSERT_TRUE((arr.end - 1)->end == src.end, "Last token end incorrect");
 }
 
-void test_token_contents(void) {
+static size_t split_cases_max_slots(bool copy_source) {
   split_cases[4].str = str5;
-  faf_region r = faf_region_acquire();
+  size_t most = 0;
   for (size_t i = 0; i < sizeof(split_cases) / sizeof(split_cases[0]); ++i) {
+    size_t need = split_slots(split_cases[i].count);
+    if (copy_source)
+      need += faf_slots_for(strlen(split_cases[i].str));
+    if (need > most)
+      most = need;
+  }
+  return most;
+}
+
+static void test_token_contents(void) {
+  TEST_REQUIRE(split_cases_max_slots(false) <= FAF_POOL_SLOTS,
+               "the largest case needs a bigger region (FAF_POOL_SLOTS)");
+  split_cases[4].str = str5;
+  for (size_t i = 0; i < sizeof(split_cases) / sizeof(split_cases[0]); ++i) {
+    faf_region r = faf_region_acquire(); // a region per case
     faf_string src = faf_string_init(split_cases[i].str);
     faf_string_arr arr = faf_string_split(r, src, split_cases[i].tok);
     check_tokens(src, arr, split_cases[i].tok, split_cases[i].count);
+    faf_region_release(r);
   }
-  faf_region_release(r);
 }
 
-void test_split_region_source(void) {
+static void test_split_region_source(void) {
   // a source already in pool storage takes the direct tail load path; it has
   // to give the same answer as the bounce buffer path
+  TEST_REQUIRE(split_cases_max_slots(true) <= FAF_POOL_SLOTS,
+               "the largest case and its copy need a bigger region");
   split_cases[4].str = str5;
-  faf_region r = faf_region_acquire();
   for (size_t i = 0; i < sizeof(split_cases) / sizeof(split_cases[0]); ++i) {
+    faf_region r = faf_region_acquire(); // a region per case
     faf_string src = faf_string_copy(r, faf_string_init(split_cases[i].str));
     faf_string_arr arr = faf_string_split(r, src, split_cases[i].tok);
     check_tokens(src, arr, split_cases[i].tok, split_cases[i].count);
+    faf_region_release(r);
   }
-  faf_region_release(r);
 }
 
-void test_split_nul_separator(void) {
+static void test_split_nul_separator(void) {
   // zero padding past the end must never count as a separator
   faf_region r = faf_region_acquire();
   faf_string caller = faf_string_init("abc");
@@ -208,7 +238,7 @@ void test_split_nul_separator(void) {
   faf_region_release(r);
 }
 
-void test_split_owned(void) {
+static void test_split_owned(void) {
   faf_region r = faf_region_acquire();
   char line[] = "alpha|beta||gamma-delta-epsilon-zeta|";
   faf_string src = faf_string_init(line);
@@ -231,40 +261,52 @@ void test_split_owned(void) {
   faf_region_release(r);
 }
 
-void test_split_many_separators(void) {
+static void test_split_many_separators(void) {
   // more separators than one find_bytes batch (64), in both split variants
   char line[400];
   size_t n = 0;
   for (int i = 0; i < 150; ++i) {
     n += (size_t)snprintf(line + n, sizeof(line) - n, "%d,", i % 10);
   }
-  faf_region r = faf_region_acquire();
+  // split_owned: the token array, a slot per 1-byte token and the source
+  TEST_REQUIRE(faf_slots_for(151 * sizeof(faf_string)) + 151 + faf_slots_for(n)
+                   <= FAF_POOL_SLOTS,
+               "151 owned tokens need a bigger region (FAF_POOL_SLOTS)");
   faf_string src = faf_string_init_n(line, n);
+  faf_region r = faf_region_acquire();
   faf_string_arr arr = faf_string_split(r, src, ',');
   check_tokens(src, arr, ',', 151);
+  faf_region_release(r);
+
+  r = faf_region_acquire();
   faf_string_arr owned = faf_string_split_owned(r, src, ',');
   ASSERT_INT_EQ(151, (int)(owned.end - owned.start), "owned token count");
-  for (int i = 0; i < 150; ++i) {
-    char want[2] = {(char)('0' + i % 10), 0};
-    ASSERT_STR_EQ(want, owned.start[i].start, "owned token contents");
+  if (owned.end - owned.start == 151) { // an empty result would crash below
+    for (int i = 0; i < 150; ++i) {
+      char want[2] = {(char)('0' + i % 10), 0};
+      ASSERT_STR_EQ(want, owned.start[i].start, "owned token contents");
+    }
   }
   faf_region_release(r);
 }
 
-void test_split_out_of_space(void) {
+static void test_split_out_of_space(void) {
+  // leave one slot less than two tokens need; that's 1 slot with 64-bit
+  // pointers but none with 32-bit ones, where two tokens fit in one slot
+  const int used = FAF_POOL_SLOTS - ((int)split_slots(2) - 1);
   faf_region r = faf_region_acquire();
-  faf_reserve(r, FAF_POOL_SLOTS - 1);
+  faf_reserve(r, (size_t)used);
 
   faf_string_arr arr = faf_string_split(r, faf_string_init("a,b"), ',');
   ASSERT_TRUE(arr.start == NULL && arr.end == NULL,
               "Split into a full region succeeded");
-  ASSERT_INT_EQ(FAF_POOL_SLOTS - 1, (int)faf_region_used(r),
+  ASSERT_INT_EQ(used, (int)faf_region_used(r),
                 "Failed split moved the cursor");
   faf_region_release(r);
 }
 
 // Test case definitions
-test_case_t strsplit_tests[] = {
+static test_case_t strsplit_tests[] = {
     {"basic_split", test_str1},
     {"three_part_split", test_str2},
     {"empty_string", test_str3},
@@ -281,11 +323,11 @@ test_case_t strsplit_tests[] = {
 };
 
 // Setup and teardown functions
-void strsplit_setup(void) {
+static void strsplit_setup(void) {
     // Any setup code needed before each test
 }
 
-void strsplit_teardown(void) {
+static void strsplit_teardown(void) {
     // Any cleanup code needed after each test
 }
 

@@ -16,7 +16,7 @@ static uint32_t rng(void) {
   return (uint32_t)rng_state;
 }
 
-void test_parse_int(void) {
+static void test_parse_int(void) {
   int64_t i;
   uint64_t u;
   ASSERT_TRUE(faf_string_parse_i64(S("-9223372036854775808"), &i) && i == INT64_MIN, "i64 min");
@@ -47,7 +47,7 @@ static uint64_t ulp_diff(double a, double b) {
   return x > y ? x - y : y - x;
 }
 
-void test_parse_f64(void) {
+static void test_parse_f64(void) {
   double d;
   // fast path: must match strtod exactly
   const char *exact[] = {"0", "1", "-1", "0.1", "3.14159", "-2.5e-3", "1e22",
@@ -83,7 +83,7 @@ void test_parse_f64(void) {
     ASSERT_FALSE(faf_string_parse_f64(S(bad[k]), &d), bad[k]);
 }
 
-void test_from_int(void) {
+static void test_from_int(void) {
   faf_region r = faf_region_acquire();
   ASSERT_STR_EQ("-9223372036854775808", faf_string_from_i64(r, INT64_MIN).start, "from_i64 min");
   ASSERT_STR_EQ("0", faf_string_from_i64(r, 0).start, "from_i64 zero");
@@ -102,7 +102,7 @@ void test_from_int(void) {
   faf_region_release(r);
 }
 
-void test_ascii_utf8(void) {
+static void test_ascii_utf8(void) {
   ASSERT_TRUE(faf_string_is_ascii(S("plain ascii, long enough to use SIMD blocks")), "ascii");
   ASSERT_FALSE(faf_string_is_ascii(S("caf\xC3\xA9")), "not ascii");
   ASSERT_TRUE(faf_string_is_ascii(S("")), "empty is ascii");
@@ -122,16 +122,16 @@ void test_ascii_utf8(void) {
 }
 
 // Test case definitions
-test_case_t parse_tests[] = {
+static test_case_t parse_tests[] = {
     {"parse_int", test_parse_int},
     {"parse_f64", test_parse_f64},
     {"from_int", test_from_int},
     {"ascii_utf8", test_ascii_utf8},
 };
 
-void parse_setup(void) {}
+static void parse_setup(void) {}
 
-void parse_teardown(void) {}
+static void parse_teardown(void) {}
 
 int main(int argc, char **argv) {
   test_suite_t suite = TEST_SUITE("Parse", parse_tests,

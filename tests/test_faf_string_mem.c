@@ -35,7 +35,7 @@ static const char *long_str =
       "sA59h1QawuvzJu9Csj96yE2OffYYbu7ybj6z2WGPB3HRJrK7gr8aN7dQoYtxo5ZQ4MBBvyMJ"
       "KI0s737pWcAPRNyCAUUTRPssag9wmvxpMUzdTCO7pQ93";
 
-void test_acquire(void) {
+static void test_acquire(void) {
   faf_region r = faf_region_acquire();
 
   ASSERT_TRUE(faf_region_valid(r), "Acquired region is not valid");
@@ -46,7 +46,7 @@ void test_acquire(void) {
   faf_region_release(r);
 }
 
-void test_acquire_distinct(void) {
+static void test_acquire_distinct(void) {
   // two acquires without any allocation in between must not share a pool
   faf_region a = faf_region_acquire();
   faf_region b = faf_region_acquire();
@@ -59,7 +59,7 @@ void test_acquire_distinct(void) {
   faf_region_release(b);
 }
 
-void test_acquire_exhausted(void) {
+static void test_acquire_exhausted(void) {
   faf_region all[FAF_NPOOLS];
   for (int i = 0; i < FAF_NPOOLS; ++i) {
     all[i] = faf_region_acquire();
@@ -69,17 +69,18 @@ void test_acquire_exhausted(void) {
   faf_region extra = faf_region_acquire();
   ASSERT_FALSE(faf_region_valid(extra), "Acquire succeeded with no free pools");
 
-  faf_region_release(all[3]);
+  const int freed = FAF_NPOOLS / 2; // any valid index, for any FAF_NPOOLS
+  faf_region_release(all[freed]);
   extra = faf_region_acquire();
   ASSERT_TRUE(faf_region_valid(extra), "Acquire failed after a release");
 
   faf_region_release(extra);
   for (int i = 0; i < FAF_NPOOLS; ++i) {
-    faf_region_release(all[i]); // all[3] is stale: must be a no-op
+    faf_region_release(all[i]); // all[freed] is stale: must be a no-op
   }
 }
 
-void test_reserve(void) {
+static void test_reserve(void) {
   faf_region r = faf_region_acquire();
 
   faf_span a = faf_reserve(r, 10);
@@ -94,7 +95,7 @@ void test_reserve(void) {
   faf_region_release(r);
 }
 
-void test_reserve_bounds(void) {
+static void test_reserve_bounds(void) {
   faf_region r = faf_region_acquire();
 
   faf_span too_big = faf_reserve(r, FAF_POOL_SLOTS + 1);
@@ -112,7 +113,7 @@ void test_reserve_bounds(void) {
   faf_region_release(r);
 }
 
-void test_release_invalidates(void) {
+static void test_release_invalidates(void) {
   faf_region r = faf_region_acquire();
   faf_region_release(r);
 
@@ -130,7 +131,7 @@ void test_release_invalidates(void) {
   faf_region_release(again);
 }
 
-void test_copy_short(void) {
+static void test_copy_short(void) {
   faf_region r = faf_region_acquire();
 
   const char *base_str = "hello world";
@@ -143,7 +144,9 @@ void test_copy_short(void) {
   faf_region_release(r);
 }
 
-void test_copy_long(void) {
+static void test_copy_long(void) {
+  TEST_REQUIRE(faf_slots_for(strlen(long_str)) <= FAF_POOL_SLOTS,
+               "long_str doesn't fit in one region (FAF_POOL_SLOTS)");
   faf_region r = faf_region_acquire();
 
   faf_string copy = faf_string_copy(r, faf_string_init(long_str));
@@ -157,7 +160,7 @@ void test_copy_long(void) {
   faf_region_release(r);
 }
 
-void test_copy_nul_terminated(void) {
+static void test_copy_nul_terminated(void) {
   // dirty the pool first so a missing terminator can't be hidden by zeroed
   // static memory
   faf_region r = faf_region_acquire();
@@ -181,7 +184,7 @@ void test_copy_nul_terminated(void) {
   faf_region_release(r);
 }
 
-void test_copy_from_region(void) {
+static void test_copy_from_region(void) {
   // copying a string that already lives in pool storage takes the masked
   // tail path; the bytes after it must not leak into the copy
   faf_region r = faf_region_acquire();
@@ -196,7 +199,7 @@ void test_copy_from_region(void) {
   faf_region_release(r);
 }
 
-void test_copy_out_of_space(void) {
+static void test_copy_out_of_space(void) {
   faf_region r = faf_region_acquire();
   faf_reserve(r, FAF_POOL_SLOTS - 1);
 
@@ -209,7 +212,7 @@ void test_copy_out_of_space(void) {
 }
 
 // Test case definitions
-test_case_t string_mem_tests[] = {
+static test_case_t string_mem_tests[] = {
     {"acquire", test_acquire},
     {"acquire_distinct", test_acquire_distinct},
     {"acquire_exhausted", test_acquire_exhausted},
@@ -224,11 +227,11 @@ test_case_t string_mem_tests[] = {
 };
 
 // Setup and teardown functions
-void string_mem_setup(void) {
+static void string_mem_setup(void) {
     // Any setup code needed before each test
 }
 
-void string_mem_teardown(void) {
+static void string_mem_teardown(void) {
     // Any cleanup code needed after each test
 }
 

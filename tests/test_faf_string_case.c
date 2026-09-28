@@ -8,7 +8,7 @@
 #include <stdio.h>
 #include <string.h>
 
-void test_basic(void) {
+static void test_basic(void) {
   faf_region r = faf_region_acquire();
   const char *src = "Hello, World! ABC xyz";
 
@@ -19,7 +19,7 @@ void test_basic(void) {
   faf_region_release(r);
 }
 
-void test_all_bytes(void) {
+static void test_all_bytes(void) {
   // every byte value, including the ones just outside 'A'..'Z' ('@', '[')
   // and the high bytes that are negative as signed chars
   char src[255];
@@ -40,21 +40,26 @@ void test_all_bytes(void) {
   faf_region_release(r);
 }
 
-void test_lengths(void) {
+static void test_lengths(void) {
   const char *src = "ABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZ";
-  faf_region r = faf_region_acquire();
   for (size_t len = 0; len <= 40; ++len) {
+    faf_region r = faf_region_acquire(); // per length: any pool size
     faf_string lower = faf_string_to_lower(r, faf_string_init_n(src, len));
+    ASSERT_TRUE(lower.start != NULL, "to_lower failed");
+    if (lower.start == NULL) {
+      faf_region_release(r);
+      break;
+    }
     ASSERT_INT_EQ((int)len, (int)strlen(lower.start), "Length incorrect");
     for (size_t i = 0; i < len; ++i) {
       ASSERT_TRUE(lower.start[i] == tolower((unsigned char)src[i]),
                   "Character not lowered");
     }
+    faf_region_release(r);
   }
-  faf_region_release(r);
 }
 
-void test_out_of_space(void) {
+static void test_out_of_space(void) {
   faf_region r = faf_region_acquire();
   faf_reserve(r, FAF_POOL_SLOTS);
   faf_string lower = faf_string_to_lower(r, faf_string_init("ABC"));
@@ -62,7 +67,7 @@ void test_out_of_space(void) {
   faf_region_release(r);
 }
 
-void test_upper(void) {
+static void test_upper(void) {
   faf_region r = faf_region_acquire();
   const char *src = "Hello, World! abc XYZ {`}@[";
   faf_string upper = faf_string_to_upper(r, faf_string_init(src));
@@ -85,7 +90,7 @@ void test_upper(void) {
   faf_region_release(r);
 }
 
-void test_icase(void) {
+static void test_icase(void) {
   faf_string a = faf_string_init("Content-Length: 1234 abcdefghijklmnop");
   faf_string b = faf_string_init("content-length: 1234 ABCDEFGHIJKLMNOP");
   faf_string c = faf_string_init("content-length: 1234 ABCDEFGHIJKLMNOQ");
@@ -107,7 +112,7 @@ void test_icase(void) {
 }
 
 // Test case definitions
-test_case_t case_tests[] = {
+static test_case_t case_tests[] = {
     {"basic", test_basic},
     {"all_bytes", test_all_bytes},
     {"lengths", test_lengths},
@@ -117,11 +122,11 @@ test_case_t case_tests[] = {
 };
 
 // Setup and teardown functions
-void case_setup(void) {
+static void case_setup(void) {
     // Any setup code needed before each test
 }
 
-void case_teardown(void) {
+static void case_teardown(void) {
     // Any cleanup code needed after each test
 }
 
