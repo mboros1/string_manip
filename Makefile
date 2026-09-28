@@ -74,12 +74,15 @@ $(UTIL_TARGETS): %: $(SRC_DIR)/%.c | $(BIN_DIR)
 generate_random_strings: $(OBJ_DIR)/generate_random_strings.o $(LIB) | $(BIN_DIR)
 	$(CC) $(CFLAGS) $(EXTRA_FLAGS) $^ -o $(BIN_DIR)/$@
 
-# Benchmarks: library sources compiled together at BENCH_FLAGS
-$(BIN_DIR)/bench_faf_string: bench_faf_string.c $(LIB_SRCS) $(wildcard $(SRC_DIR)/faf*.h) | $(BIN_DIR)
-	$(CC) $(BENCH_FLAGS) $(EXTRA_FLAGS) bench_faf_string.c $(LIB_SRCS) -o $@
+# Benchmarks: library sources compiled together at BENCH_FLAGS.
+# `make bench BENCH_GROUPS="alloc io"` runs only those groups.
+BENCH_SRCS = bench_faf_string.c bench_common.c bench_alloc.c bench_io.c
+BENCH_GROUPS ?=
+$(BIN_DIR)/bench_faf_string: $(BENCH_SRCS) bench.h $(LIB_SRCS) $(wildcard $(SRC_DIR)/faf*.h) | $(BIN_DIR)
+	$(CC) $(BENCH_FLAGS) $(EXTRA_FLAGS) $(BENCH_SRCS) $(LIB_SRCS) -o $@
 
 bench: $(BIN_DIR)/bench_faf_string
-	@$(BIN_DIR)/bench_faf_string
+	@$(BIN_DIR)/bench_faf_string $(BENCH_GROUPS)
 
 # Test framework dependency
 test_framework: $(BIN_DIR) $(OBJ_DIR) $(OBJ_DIR)/faf_test.o

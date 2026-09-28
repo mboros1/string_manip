@@ -37,6 +37,12 @@ OPTS = [
     ("debug", "-O0 -g"),
     ("O2", "-O2 -g"),
 ]
+BENCH_GROUPS = [
+    ("strings", "per-record processing, small copies, splitting"),
+    ("alloc", "size sweep, region overhead, churn, string growth"),
+    ("io", "reading lines, CSV transform, word count, format/parse"),
+    ("kernels", "SIMD kernels vs scalar reference vs libc"),
+]
 CHECKS = [
     ("all", "both checks below"),
     ("backends", "rerun all tests on the scalar backend"),
@@ -47,13 +53,13 @@ CHECKS = [
 ACTION_OPTIONS = {
     "test": ["tests", "backend", "arch", "opt"],
     "build": ["backend", "arch", "opt"],
-    "bench": ["backend", "arch"],
+    "bench": ["groups", "backend", "arch"],
     "check": ["check", "arch"],
     "clean": [],
 }
 
 DEFAULTS = {"backend": "simd", "arch": "native", "opt": "debug",
-            "check": "all", "tests": []}
+            "check": "all", "tests": [], "groups": []}
 
 EXAMPLES = """\
 examples:
@@ -63,6 +69,7 @@ examples:
   ./faf test --backend ref       all tests on the scalar backend
   ./faf test --arch x86_64       all tests on SSE2 through Rosetta
   ./faf bench --backend ref      benchmark the scalar backend
+  ./faf bench alloc io           only the allocation and I/O benchmarks
   ./faf check freestanding
   ./faf again                    repeat the last run
   ./faf test -n                  print the make command without running it
@@ -133,6 +140,9 @@ def make_command(choices, make_args=()):
     elif action == "build":
         cmd.append("all")
     elif action == "bench":
+        groups = choices.get("groups") or []
+        if groups:
+            cmd.append("BENCH_GROUPS=" + " ".join(groups))
         cmd.append("bench")
     elif action == "check":
         check = choices.get("check", "all")
@@ -199,6 +209,33 @@ def choose(title, options, default):
         print(f"  enter 1-{len(options)}, a name, Enter for [{default}], or q")
 
 
+def choose_many(title, names, default, describe=None):
+    """Numbered multiple choice; returns [] for all."""
+    print(f"\n{title} (numbers or names separated by spaces, 'all' for all):")
+    width = max(len(n) for n in names)
+    for i, name in enumerate(names, 1):
+        extra = f"  {describe[name]}" if describe else ""
+        print(f"  {i:>2}) {name:<{width}}{extra}")
+    default_label = " ".join(default) if default else "all"
+    while True:
+        answer = ask(f"[{default_label}] > ")
+        if not answer:
+            return default
+        if answer.lower() in ("a", "all", "0"):
+            return []
+        picked = []
+        for word in answer.replace(",", " ").split():
+            if word.isdigit() and 1 <= int(word) <= len(names):
+                picked.append(names[int(word) - 1])
+            elif word in names:
+                picked.append(word)
+            else:
+                print(f"  unknown: {word}")
+                break
+        else:
+            return list(dict.fromkeys(picked))
+
+
 def choose_tests(default):
     tests = all_tests()
     print("\nTests (numbers or names separated by spaces, 'all' for all):")
@@ -246,6 +283,10 @@ def interactive():
     opts = ACTION_OPTIONS[action]
     if "tests" in opts:
         choices["tests"] = choose_tests(defaults["tests"])
+    if "groups" in opts:
+        choices["groups"] = choose_many(
+            "Benchmark groups", [n for n, _ in BENCH_GROUPS],
+            defaults["groups"], dict(BENCH_GROUPS))
     if "check" in opts:
         choices["check"] = choose("Check", CHECKS, defaults["check"])
     if "backend" in opts:
@@ -301,6 +342,12 @@ def parse_args(argv):
             p.add_argument("tests", nargs="*", metavar="TEST",
                            help="tests to run, e.g. case or faf_string_case "
                                 "(default: all; ./faf list shows them)")
+        elif name == "bench":
+            p.add_argument("groups", nargs="*", metavar="GROUP",
+                           choices=[v for v, _ in BENCH_GROUPS],
+                           help="benchmark groups: " +
+                                ", ".join(v for v, _ in BENCH_GROUPS) +
+                                " (default: all)")
         elif name == "check":
             p.add_argument("check", nargs="?", default="all",
                            choices=[v for v, _ in CHECKS],

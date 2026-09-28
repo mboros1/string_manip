@@ -1,154 +1,25 @@
 // Benchmarks for the region allocator and the string operations built on it.
-// Build with `make bench` (compiled at -O2, independent of CFLAGS).
+// Build and run with `make bench` (compiled at -O2, independent of CFLAGS),
+// or `./faf bench`. Pass group names to run only some: see --help.
 //
-// Each benchmark reports the best of RUNS runs, in ns per operation or GB/s.
-// Results are printed in groups of alternatives; the fastest in each group is
-// highlighted and the rest show how much slower they are. Colors are used on
-// a terminal unless NO_COLOR is set.
+// The benchmark groups live in bench_*.c; shared output is in bench.h.
 
+#include "bench.h"
 #include "faf.h"
 #include "faf_kernels.h"
 
 #include <ctype.h>
-#include <stdarg.h>
-#include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>
 #include <unistd.h>
-
-#define RUNS 5
-#define NLINES 20000
-
-static volatile size_t sink;
-// escape malloc results so the compiler can't elide malloc/free pairs
-static char *volatile sink_ptr;
-
-static double now_ns(void) {
-  struct timespec ts;
-  clock_gettime(CLOCK_MONOTONIC, &ts);
-  return ts.tv_sec * 1e9 + ts.tv_nsec;
-}
-
-/* ---- Output ---- */
-
-static bool use_color;
-
-#define SGR(code) (use_color ? "\033[" code "m" : "")
-#define RESET SGR("0")
-#define BOLD SGR("1")
-#define DIM SGR("2")
-#define RED SGR("31")
-#define GREEN SGR("32")
-#define YELLOW SGR("33")
-#define CYAN SGR("36")
-
-typedef enum { NS_PER_OP, GB_PER_S } bench_unit;
-
-// Results of one group of alternatives, printed together by group_end.
-#define GROUP_MAX 8
-static struct {
-  const char *name; // NULL: rows sit directly under the section title
-  bench_unit unit;
-  int n;
-  const char *labels[GROUP_MAX];
-  double values[GROUP_MAX];
-} group;
-
-static void group_end(void) {
-  if (group.n == 0)
-    return;
-  const char *indent = group.name ? "    " : "  ";
-  if (group.name)
-    printf("\n  %s%s%s\n", BOLD, group.name, RESET);
-
-  int best = 0;
-  for (int i = 1; i < group.n; ++i) {
-    bool better = group.unit == NS_PER_OP ? group.values[i] < group.values[best]
-                                          : group.values[i] > group.values[best];
-    if (better)
-      best = i;
-  }
-
-  for (int i = 0; i < group.n; ++i) {
-    double v = group.values[i];
-    printf("%s%-*s ", indent, 42 - (int)strlen(indent), group.labels[i]);
-    printf("%s", i == best && group.n > 1 ? GREEN : "");
-    if (group.unit == NS_PER_OP)
-      printf("%9.1f ns/op", v);
-    else
-      printf("%9.2f GB/s", v);
-    printf("%s", RESET);
-
-    if (group.n > 1) {
-      // how many times longer this takes than the fastest
-      double ratio = group.unit == NS_PER_OP ? v / group.values[best]
-                                             : group.values[best] / v;
-      if (i == best)
-        printf("   %sfastest%s", GREEN, RESET);
-      else if (ratio < 1.02) // within noise
-        printf("   %s~same%s", DIM, RESET);
-      else
-        printf("   %s%5.2fx slower%s",
-               ratio < 1.10 ? DIM : ratio < 2.0 ? YELLOW : RED, ratio, RESET);
-    }
-    printf("\n");
-  }
-  group.n = 0;
-}
-
-// Start a new group of alternatives; `name` may be NULL.
-static void group_begin(const char *name, bench_unit unit) {
-  group_end();
-  group.name = name;
-  group.unit = unit;
-}
-
-static void group_add(const char *label, double value) {
-  if (group.n < GROUP_MAX) {
-    group.labels[group.n] = label;
-    group.values[group.n++] = value;
-  }
-}
-
-// Section title, with an optional dimmed printf-style description.
-static void section(const char *title, const char *fmt, ...) {
-  group_end();
-  printf("\n%s%s== %s ", BOLD, CYAN, title);
-  for (size_t i = strlen(title); i < 60; ++i)
-    printf("=");
-  printf("%s\n", RESET);
-  if (fmt) {
-    va_list ap;
-    va_start(ap, fmt);
-    printf("%s", DIM);
-    vprintf(fmt, ap);
-    printf("%s\n", RESET);
-    va_end(ap);
-  }
-}
-
-#define BENCH(label, ops, ...)                                                  \
-  do {                                                                         \
-    double best = 1e30;                                                        \
-    for (int run_ = 0; run_ < RUNS; ++run_) {                                  \
-      double t0_ = now_ns();                                                   \
-      __VA_ARGS__;                                                             \
-      double t_ = now_ns() - t0_;                                              \
-      if (t_ < best)                                                           \
-        best = t_;                                                             \
-    }                                                                          \
-    group_add(label, best / (ops));                                            \
-  } while (0)
 
 /* ---- Test data ---- */
 
-static char *lines[NLINES];
-static size_t line_lens[NLINES];
+char *lines[NLINES];
+size_t line_lens[NLINES];
 
-// CSV-like records: 8 fields of 2..24 mixed-case alphanumerics.
 static void make_lines(void) {
   const char alnum[] =
       "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
@@ -357,7 +228,7 @@ static size_t memchr_idx(const char *s, size_t n, char c) {
 static char lower_buf[BIG + 64];
 static char *line_copies[NLINES];
 
-static void kernel_benches(void) {
+void bench_kernels(void) {
   // big: random text with a comma every ~40 bytes, no NUL until the end
   for (size_t i = 0; i < BIG; ++i)
     big[i] = (i % 40 == 39) ? ',' : (char)('A' + rand() % 58);
@@ -447,14 +318,7 @@ static void scratch_malloc(void) {
   sink = acc;
 }
 
-int main(void) {
-  const char *no_color = getenv("NO_COLOR");
-  use_color = isatty(STDOUT_FILENO) && !(no_color && *no_color);
-  make_lines();
-  printf("\n%sfaf_string benchmarks%s\n", BOLD, RESET);
-  printf("%sbackend %s, best of %d runs, fastest in each group in green%s\n",
-         DIM, FAF_BACKEND_NAME, RUNS, RESET);
-
+void bench_strings(void) {
   section("Record processing", "split_owned + to_lower + concat, per line");
   group_begin(NULL, NS_PER_OP);
   BENCH("region: acquire ... release", NLINES, record_region());
@@ -477,7 +341,57 @@ int main(void) {
   group_begin(NULL, NS_PER_OP);
   BENCH("region: acquire + reserve + release", NLINES, scratch_region());
   BENCH("malloc + free", NLINES, scratch_malloc());
+  group_end();
+}
 
-  kernel_benches();
+static const struct {
+  const char *name;
+  const char *description;
+  void (*run)(void);
+} groups[] = {
+    {"strings", "per-record processing, small copies, splitting", bench_strings},
+    {"alloc", "size sweep, region overhead, churn, string growth", bench_alloc},
+    {"io", "reading lines, CSV transform, word count, format/parse", bench_io},
+    {"kernels", "SIMD kernels vs scalar reference vs libc", bench_kernels},
+};
+#define NGROUPS (sizeof(groups) / sizeof(groups[0]))
+
+static void usage(FILE *out) {
+  fprintf(out, "usage: bench_faf_string [group...]\n\ngroups (default: all):\n");
+  for (size_t g = 0; g < NGROUPS; ++g)
+    fprintf(out, "  %-9s %s\n", groups[g].name, groups[g].description);
+  fprintf(out, "\nSet NO_COLOR=1 to disable colors.\n");
+}
+
+int main(int argc, char **argv) {
+  bool selected[NGROUPS] = {false};
+  bool any = false;
+  for (int a = 1; a < argc; ++a) {
+    if (!strcmp(argv[a], "-h") || !strcmp(argv[a], "--help")) {
+      usage(stdout);
+      return 0;
+    }
+    size_t g = 0;
+    while (g < NGROUPS && strcmp(argv[a], groups[g].name))
+      ++g;
+    if (g == NGROUPS) {
+      fprintf(stderr, "unknown group '%s'\n\n", argv[a]);
+      usage(stderr);
+      return 2;
+    }
+    selected[g] = any = true;
+  }
+
+  const char *no_color = getenv("NO_COLOR");
+  use_color = isatty(STDOUT_FILENO) && !(no_color && *no_color);
+  make_lines();
+  printf("\n%sfaf_string benchmarks%s\n", BOLD, RESET);
+  printf("%sbackend %s, best of %d runs, fastest in each group in green%s\n",
+         DIM, FAF_BACKEND_NAME, RUNS, RESET);
+
+  for (size_t g = 0; g < NGROUPS; ++g)
+    if (!any || selected[g])
+      groups[g].run();
+  group_end();
   return 0;
 }

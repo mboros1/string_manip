@@ -49,6 +49,7 @@ This project uses a Makefile build system that can be configured for your local 
 ./faf test case cmp          # run test_faf_string_case and test_faf_string_cmp
 ./faf test --backend ref     # all tests on the scalar backend
 ./faf test --arch x86_64     # SSE2 through Rosetta on Apple Silicon
+./faf bench alloc io         # only the allocation and I/O benchmarks
 ./faf again                  # repeat the last run
 ./faf build -n               # print the make command only
 ./faf build -- -j8 CC=cc     # arguments after -- go to make
@@ -99,6 +100,9 @@ make check_freestanding
 
 # Build (at -O2) and run the benchmarks
 make bench
+
+# Only some benchmark groups: strings, alloc, io, kernels
+make bench BENCH_GROUPS="alloc io"
 
 # Any of the above for another backend or architecture, e.g. SSE2 on Apple Silicon
 make OBJ_DIR=obj/x86 BIN_DIR=bin/x86 EXTRA_FLAGS="-arch x86_64" all_tests
