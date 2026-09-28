@@ -79,6 +79,7 @@ esp32s3 rev 2, 240 MHz, ESP-IDF v6.1
 | 2026-09-28 `2335dc5de` format: use out-of-line builder appends (inlining them made  | swar | 6,858 | 45,895 | 3,850 | 5,035 |  | 4,650 | 6,743 | 586,754 | 101,972 |
 | 2026-09-28 `7b7a72194` faf_tokens: batched split iterator, separators found 16 at a | swar | 6,852 | 45,940 | 3,832 | 5,032 | 4,452 | 4,645 | 6,743 | 586,756 | 101,972 |
 | 2026-09-28 `38bd90fa9` pie: SWAR lead inlined in the same unit, 64-byte chunks, 32- | pie | 6,848 | 45,938 | 3,838 | 5,440 | 4,465 | 4,648 | 6,833 | 586,760 | 101,976 |
+| 2026-09-28 `aecfc6f61` pie: find_byte in assembly (hardware loops, SWAR lead and PI | pie | 6,848 | 45,938 | 3,832 | 4,848 | 4,452 | 4,645 |  |  |  |
 
 **Kernels, MB/s (higher is better)**
 
@@ -88,3 +89,4 @@ esp32s3 rev 2, 240 MHz, ESP-IDF v6.1
 | 2026-09-28 `2335dc5de` format: use out-of-line builder appends (inlining them made  | swar | 112 | 59.9 | 136 | 72.3 | 21.8 | 39.9 |
 | 2026-09-28 `7b7a72194` faf_tokens: batched split iterator, separators found 16 at a | swar | 112 | 59.9 | 136 | 72.3 | 21.8 | 39.9 |
 | 2026-09-28 `38bd90fa9` pie: SWAR lead inlined in the same unit, 64-byte chunks, 32- | pie | 439 | 584 | 460 | 231 | 21.8 | 39.9 |
+| 2026-09-28 `aecfc6f61` pie: find_byte in assembly (hardware loops, SWAR lead and PI | pie | 717 | 584 | 446 | 234 | 21.8 | 39.9 |
