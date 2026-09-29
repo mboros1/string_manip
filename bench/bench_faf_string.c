@@ -397,6 +397,7 @@ static const struct {
     {"io", "reading lines, CSV transform, word count, format/parse", bench_io},
 #endif
     {"kernels", "SIMD kernels vs scalar reference vs libc", bench_kernels},
+    {"batch", "batch calls for bindings vs the same loop in C", bench_batch},
 };
 #define NGROUPS (sizeof(groups) / sizeof(groups[0]))
 

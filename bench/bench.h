@@ -96,5 +96,6 @@ void bench_strings(void);
 void bench_kernels(void);
 void bench_alloc(void);
 void bench_io(void);
+void bench_batch(void);
 
 #endif // BENCH_H

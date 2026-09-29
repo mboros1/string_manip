@@ -71,7 +71,10 @@ make esp32_test IDF_TARGET=esp32s3 ESPPORT=/dev/cu.usbmodem101
 # Build (at -O2) and run the benchmarks
 make bench
 
-# Only some benchmark groups: strings, alloc, io, kernels
+# Shared library (at -O2) for bindings, e.g. examples/python
+make shared
+
+# Only some benchmark groups: strings, alloc, io, kernels, batch
 make bench BENCH_GROUPS="alloc io"
 
 # Record a benchmark run in bench/results/ (summarized in bench/RESULTS.md);

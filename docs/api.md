@@ -18,6 +18,7 @@ Include `faf.h` for everything, or the individual headers:
 | `faf_string_parse.h` | `parse_i64` / `parse_u64` / `parse_f64`, `from_i64` / `from_u64`, `is_ascii`, `utf8_valid` |
 | `faf_string_ring.h` | `faf_ring`: a ring of strings over your buffer; old strings are overwritten, and handles detect it (`push`, `get`, `valid`) |
 | `faf_string_hash.h`, `faf_string_sort.h` | 64 bit `hash`, `sort_chars`, `arr_sort` |
+| `faf_batch.h` | Batches for bindings from other languages: many strings per call as views (`starts[]` / `ends[]`) into one buffer, Arrow compatible. `split`, `find` / `count` / `contains` / `starts_with` / `ends_with` / `eq` / `eq_icase` / `hash` per string, `select` / `take` (views only), `compact` / `ascii_case` / `join` into your buffer. Only pointers and integers, no allocation; `make shared` builds `libfaf.dylib` / `.so` |
 
 Functions that allocate take a `faf_region` and return `FAF_STRING_NONE` when the region is out of space. Everything allocated from a region is freed at once by `faf_region_release`.
 

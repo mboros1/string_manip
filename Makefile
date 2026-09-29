@@ -85,7 +85,8 @@ generate_random_strings: $(OBJ_DIR)/generate_random_strings.o $(LIB) | $(BIN_DIR
 # Benchmarks: library sources compiled together at BENCH_FLAGS.
 # `make bench BENCH_GROUPS="alloc io"` runs only those groups.
 BENCH_SRCS = $(addprefix $(BENCH_DIR)/, \
-               bench_faf_string.c bench_common.c bench_alloc.c bench_io.c)
+               bench_faf_string.c bench_common.c bench_alloc.c bench_io.c \
+               bench_batch.c)
 BENCH_GROUPS ?=
 $(BIN_DIR)/bench_faf_string: $(BENCH_SRCS) $(BENCH_DIR)/bench.h $(LIB_SRCS) $(LIB_HEADERS) | $(BIN_DIR)
 	$(CC) $(BENCH_FLAGS) $(EXTRA_FLAGS) $(INCLUDES) $(BENCH_SRCS) $(LIB_SRCS) -o $@
@@ -103,6 +104,19 @@ bench_record: $(BIN_DIR)/bench_faf_string
 
 bench_report:
 	@python3 tools/bench_track.py report
+
+# Shared library for bindings from other languages (examples/python):
+# always optimized, like the benchmarks, whatever CFLAGS says.
+SHARED_FLAGS ?= -O2
+ifeq ($(shell uname -s),Darwin)
+  SHARED_LIB = $(OBJ_DIR)/libfaf.dylib
+else
+  SHARED_LIB = $(OBJ_DIR)/libfaf.so
+endif
+$(SHARED_LIB): $(LIB_SRCS) $(LIB_HEADERS) | $(OBJ_DIR)
+	$(CC) $(SHARED_FLAGS) $(EXTRA_FLAGS) $(INCLUDES) -fPIC -shared $(LIB_SRCS) -o $@
+
+shared: $(SHARED_LIB)
 
 # Test framework dependency
 test_framework: $(BIN_DIR) $(OBJ_DIR) $(OBJ_DIR)/faf_test.o
@@ -222,7 +236,7 @@ clean:
 
 -include $(wildcard $(OBJ_DIR)/*.d)
 
-.PHONY: all clean all_tests test test_framework test_explorer config bench \
+.PHONY: all clean all_tests test test_framework test_explorer config bench shared \
         check_backends check_small check_no_arenas check_freestanding esp32_test esp32_bench \
         esp32_bench_record bench_record bench_report \
         generate_random_strings \
