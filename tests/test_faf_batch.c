@@ -445,6 +445,41 @@ static void test_null_where_empty(void) {
   faf_batch_free(e), faf_batch_free(z), faf_batch_free(b);
 }
 
+static void test_shifted_result(void) {
+  // a result whose views had to be shifted (they didn't start at 0): every
+  // operation must read it as the strings it holds
+  const char *text = "xxxxAbc,DEF,,gH";
+  int64_t offs[5] = {4, 7, 11, 12, 15};
+  faf_batch o = faf_batch_from_offsets(A, text, offs, 4); // Abc ,DEF , ,gH
+  faf_batch r = faf_batch_ascii_case(A, o, 0);
+  const char *want[4] = {"abc", ",def", ",", ",gh"};
+  int64_t st[4], en[4], pos = 0;
+  static char flat[32];
+  for (int i = 0; i < 4; ++i) {
+    size_t len = strlen(want[i]);
+    memcpy(flat + pos, want[i], len);
+    st[i] = pos, en[i] = pos + (int64_t)len, pos += (int64_t)len;
+  }
+  ASSERT_TRUE(same_strings(r, flat, st, en, 4), "shifted strings");
+  faf_batch_find(r, "d", 1, out64);
+  ASSERT_TRUE(out64[0] == -1 && out64[1] == 1 && out64[3] == -1, "find");
+  faf_batch_contains(r, "gh", 2, out8);
+  ASSERT_TRUE(!out8[0] && !out8[1] && !out8[2] && out8[3], "contains");
+  int64_t n = faf_batch_join(r, "|", 1, dst);
+  ASSERT_TRUE(n == 14 && memcmp(dst, "abc|,def|,|,gh", 14) == 0, "join");
+  uint8_t mask[4] = {0, 1, 0, 1};
+  faf_batch sel = faf_batch_select(A, r, mask);
+  int64_t ss[2] = {st[1], st[3]}, se[2] = {en[1], en[3]};
+  ASSERT_TRUE(same_strings(sel, flat, ss, se, 2), "select");
+  faf_batch up = faf_batch_ascii_case(A, sel, 1); // a result of a result
+  const int64_t *us = faf_batch_starts(up);
+  ASSERT_TRUE(up && memcmp(faf_batch_data(up) + us[0], ",DEF", 4) == 0,
+              "upper of a selection");
+  faf_batch_ascii_case_inplace(r, 1); // r's bytes are its own region's
+  ASSERT_TRUE(memcmp(faf_batch_data(r), "ABC,DEF,,GH", 11) == 0, "in place");
+  faf_batch_free(up), faf_batch_free(sel), faf_batch_free(r), faf_batch_free(o);
+}
+
 static test_case_t batch_tests[] = {
     {"split_cases", test_split_cases},
     {"split_random", test_split_random},
@@ -459,6 +494,7 @@ static test_case_t batch_tests[] = {
     {"too_big", test_too_big},
     {"high_bytes", test_high_bytes},
     {"null_where_empty", test_null_where_empty},
+    {"shifted_result", test_shifted_result},
 };
 
 static void batch_setup(void) {
