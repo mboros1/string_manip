@@ -8,6 +8,7 @@
 #include "kernels/faf_kernels.h"
 
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -18,19 +19,13 @@ static uint8_t *mask;
 static uint64_t *hashes;
 static char *dst;
 
-static void setup(void) {
+// False if there isn't memory for the input and the outputs (small boards).
+static bool setup(void) {
   buf_len = 0;
   for (int i = 0; i < NLINES; ++i)
     buf_len += line_lens[i] + 1;
-  buf = malloc(buf_len);
-  size_t at = 0;
-  for (int i = 0; i < NLINES; ++i) {
-    memcpy(buf + at, lines[i], line_lens[i]);
-    at += line_lens[i];
-    buf[at++] = '\n';
-  }
-  buf_len = at - 1; // no trailing newline: exactly NLINES pieces
   size_t n = NLINES;
+  buf = malloc(buf_len);
   starts = malloc(n * sizeof *starts);
   ends = malloc(n * sizeof *ends);
   out64 = malloc(n * sizeof *out64);
@@ -40,7 +35,18 @@ static void setup(void) {
   mask = malloc(n);
   hashes = malloc(n * sizeof *hashes);
   dst = malloc(buf_len + 1);
+  if (!buf || !starts || !ends || !out64 || !os || !oe || !offs || !mask ||
+      !hashes || !dst)
+    return false;
+  size_t at = 0;
+  for (int i = 0; i < NLINES; ++i) {
+    memcpy(buf + at, lines[i], line_lens[i]);
+    at += line_lens[i];
+    buf[at++] = '\n';
+  }
+  buf_len = at - 1; // no trailing newline: exactly NLINES pieces
   faf_batch_split(buf, buf_len, '\n', starts, ends, n);
+  return true;
 }
 
 static void teardown(void) {
@@ -89,10 +95,15 @@ static void loop_lower(void) {
 }
 
 void bench_batch(void) {
-  setup();
+  section("Batch calls", "%d CSV-like lines in one buffer; ns per line", NLINES);
+  if (!setup()) {
+    printf("  not enough memory for %zu bytes of input and outputs\n",
+           2 * buf_len);
+    teardown();
+    return;
+  }
   const size_t n = NLINES;
 
-  section("Batch calls", "%d CSV-like lines in one buffer; ns per line", NLINES);
   group_begin("split into lines", NS_PER_OP);
   BENCH("faf_batch_split", n,
         sink += faf_batch_split(buf, buf_len, '\n', os, oe, n));

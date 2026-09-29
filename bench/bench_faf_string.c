@@ -327,6 +327,8 @@ void bench_kernels(void) {
   BIG_BENCH("scalar", faf_string_hash(faf_string_init_n(big, BIG)));
   group_end();
   free((void *)other);
+  for (int i = 0; i < NLINES; ++i)
+    free(line_copies[i]);
 }
 
 /* ---- 5. Per-line scratch buffer (generate_random_strings) ---- */
