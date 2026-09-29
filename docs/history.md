@@ -465,8 +465,12 @@ share buffers, so other views see the change.
 Result (`examples/python/RESULTS.md`): with `out=` reused, `lower` equals
 pyarrow's best-of-N from 32 B lines up. Fresh output is what remains: a new
 `bytearray` or anonymous `mmap` fills at ~8 GB/s against ~31 GB/s into
-reused memory, and in a fresh process pyarrow is still ~2x faster at 128 B
-and 4 KB; its allocator gets new memory faster than Python's does.
+reused memory. In a fresh process pyarrow is ~2x faster at 128 B and 4 KB
+(medians of 7 processes). The first explanation, that its allocator gets new
+memory faster, was checked and is wrong: fresh 33 MB through its pool
+(mimalloc) filled at 6.1 GB/s against 8.0 GB/s for a `bytearray`, and in
+isolation faf's cold lower was the faster one. The benchmark's cold gap is
+not explained yet.
 
 ## Lessons
 

@@ -20,7 +20,9 @@ the others. Plain Python works on `bytes` (ASCII semantics, like faf).
   0.75x at 8 B). A fresh `lower()` is ~4x slower than pyarrow's best-of-N,
   because allocating and first touching new memory costs more than the
   conversion; in a fresh process, where pyarrow's memory pool is cold too,
-  pyarrow is even at 8 B and ~2x faster at 128 B and 4 KB. Short-string
+  pyarrow is even at 8 B and ~2x faster at 128 B and 4 KB (repeatable over
+  7 processes; the cause is not yet known: pyarrow's fresh memory is not
+  faster, see below). Short-string
   `lengths` and `startswith` are also slightly faster in pyarrow.
 - **Pipelines:** load 529 MB of log lines, keep the 2% with ERROR, lower case
   them, write them out: faf 0.30 s, pyarrow 1.52 s, plain Python 2.03 s
@@ -149,8 +151,14 @@ First call in a fresh process, so neither side has warm memory:
 
 Allocating fresh output memory is what's left: a new `bytearray` (or an
 anonymous `mmap`, measured the same) runs at ~8 GB/s for 33 MB against ~31
-GB/s into a reused one; pyarrow's allocator gets fresh memory faster, and
-its pool keeps it between calls. Batches of 100 strings now win `lower`
+GB/s into a reused one, and pyarrow's pool (mimalloc here) keeps freed
+memory between calls, which is why its best-of-N is fast. Its *fresh* memory
+is not faster: allocating and writing 33 MB in a new process ran at 6.1 GB/s
+through the pool against 8.0 GB/s for a `bytearray`. Medians over 7 fresh
+processes of the cold `lower` above: 128 B, faf 24.4 vs pyarrow 13.4 ns;
+4 KB, 583 vs 277 ns. Timed in isolation, faf's cold `bytearray` + kernel
+is ~18.6 ns per 128 B line and pyarrow's `ascii_lower` ~23 ns, so the gap
+comes from something in the benchmark setup that isn't identified yet. Batches of 100 strings now win `lower`
 against plain Python 1.9x (was 1.04x). Other operations are unchanged.
 
 <details><summary>Full output</summary>
