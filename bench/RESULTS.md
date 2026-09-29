@@ -37,6 +37,7 @@ Apple M1 Max, Darwin 25.0.0, Apple clang version 17.0.0 (clang-1700.6.4.2)
 | 2026-09-28 `38bd90fa9` pie: SWAR lead inlined in the same unit, 64-byte chunks, 32- | neon | 103 | 312 | 55.1 | 122 | 67.3 | 72.1 | 75.3 | 9,860 | 794 |
 | 2026-09-28 `73e3bdb3f` bench: recent lines, ring vs strdup/free; ring in the docs | neon | 100 | 304 | 54.6 | 121 | 66.8 | 68.6 | 75.8 | 9,874 | 774 |
 | 2026-09-29 `5a3bd813f` faf_arena: pools over caller memory, sized at run time; the  | neon | 100 | 314 | 55.8 | 121 | 66.0 | 69.8 | 75.5 | 9,880 | 766 |
+| 2026-09-29 `e14f0c22c` test_faf_batch: buffers on the heap per test; static ones le | neon | 104 | 311 | 56.0 | 122 | 67.0 | 73.1 | 75.3 | 9,928 | 768 |
 
 **Kernels, MB/s (higher is better)**
 
@@ -48,6 +49,7 @@ Apple M1 Max, Darwin 25.0.0, Apple clang version 17.0.0 (clang-1700.6.4.2)
 | 2026-09-28 `38bd90fa9` pie: SWAR lead inlined in the same unit, 64-byte chunks, 32- | neon | 61,830 | 24,920 | 42,280 | 31,060 | 8,540 | 10,680 |
 | 2026-09-28 `73e3bdb3f` bench: recent lines, ring vs strdup/free; ring in the docs | neon | 61,830 | 24,920 | 42,420 | 30,990 | 8,540 | 10,680 |
 | 2026-09-29 `5a3bd813f` faf_arena: pools over caller memory, sized at run time; the  | neon | 61,830 | 24,920 | 42,280 | 31,060 | 8,550 | 10,660 |
+| 2026-09-29 `e14f0c22c` test_faf_batch: buffers on the heap per test; static ones le | neon | 61,830 | 24,920 | 42,280 | 31,060 | 8,530 | 10,690 |
 
 ## esp32
 
@@ -63,6 +65,7 @@ esp32 rev 301, 240 MHz, ESP-IDF v6.1
 | 2026-09-28 `38bd90fa9` pie: SWAR lead inlined in the same unit, 64-byte chunks, 32- | swar | 7,610 | 57,355 | 4,385 | 5,810 | 5,090 | 5,195 | 7,319 | 703,694 | 111,228 |
 | 2026-09-29 `cf5a35fb4` ESP32_DEFINES: extra definitions for the board apps; bench h | swar | 7,738 | 63,958 | 4,460 | 5,815 | 5,102 | 5,275 | 7,443 | 720,792 | 110,548 |
 | 2026-09-29 `cf5a35fb4` ESP32_DEFINES: extra definitions for the board apps; bench h | swar, arenas off | 7,578 | 64,012 | 4,358 | 5,810 | 5,092 | 5,170 | 7,290 | 703,672 | 111,206 |
+| 2026-09-29 `1bb9d06b6` bench: free the kernels group's line copies (leaked 44 KB on | swar | 7,740 | 70,610 | 4,460 | 5,815 | 5,102 | 5,275 | 7,443 | 720,792 | 110,548 |
 
 **Kernels, MB/s (higher is better)**
 
@@ -74,6 +77,7 @@ esp32 rev 301, 240 MHz, ESP-IDF v6.1
 | 2026-09-28 `38bd90fa9` pie: SWAR lead inlined in the same unit, 64-byte chunks, 32- | swar | 101 | 56.3 | 119 | 59.9 | 19.2 | 38.3 |
 | 2026-09-29 `cf5a35fb4` ESP32_DEFINES: extra definitions for the board apps; bench h | swar | 101 | 56.4 | 119 | 59.9 | 19.2 | 38.3 |
 | 2026-09-29 `cf5a35fb4` ESP32_DEFINES: extra definitions for the board apps; bench h | swar, arenas off | 101 | 56.3 | 119 | 59.9 | 19.2 | 38.3 |
+| 2026-09-29 `1bb9d06b6` bench: free the kernels group's line copies (leaked 44 KB on | swar | 101 | 56.3 | 119 | 59.9 | 19.2 | 38.3 |
 
 ## esp32s3
 
@@ -99,6 +103,7 @@ esp32s3 rev 2, 240 MHz, ESP-IDF v6.1
 | 2026-09-29 `6a5616b78` faf_ring: 32-bit capacity check only where size_t is wider ( | pie | 6,030 | 45,815 | 2,972 | 4,378 | 3,462 | 3,788 | 6,689 | 603,754 | 102,252 |
 | 2026-09-29 `cf5a35fb4` ESP32_DEFINES: extra definitions for the board apps; bench h | pie | 6,015 | 45,828 | 2,968 | 4,380 | 3,462 | 3,780 | 6,681 | 603,748 | 102,246 |
 | 2026-09-29 `cf5a35fb4` ESP32_DEFINES: extra definitions for the board apps; bench h | pie, arenas off | 5,885 | 45,938 | 2,880 | 4,375 | 3,455 | 3,692 | 6,557 | 586,738 | 101,954 |
+| 2026-09-29 `1bb9d06b6` bench: free the kernels group's line copies (leaked 44 KB on | pie | 6,015 | 45,828 | 2,962 | 4,380 | 3,462 | 3,780 | 6,680 | 603,746 | 102,242 |
 
 **Kernels, MB/s (higher is better)**
 
@@ -120,3 +125,4 @@ esp32s3 rev 2, 240 MHz, ESP-IDF v6.1
 | 2026-09-29 `6a5616b78` faf_ring: 32-bit capacity check only where size_t is wider ( | pie | 724 | 963 | 716 | 411 | 21.8 | 39.9 |
 | 2026-09-29 `cf5a35fb4` ESP32_DEFINES: extra definitions for the board apps; bench h | pie | 724 | 963 | 716 | 411 | 21.8 | 39.9 |
 | 2026-09-29 `cf5a35fb4` ESP32_DEFINES: extra definitions for the board apps; bench h | pie, arenas off | 725 | 963 | 715 | 411 | 21.8 | 39.9 |
+| 2026-09-29 `1bb9d06b6` bench: free the kernels group's line copies (leaked 44 KB on | pie | 724 | 964 | 716 | 411 | 21.8 | 39.9 |
