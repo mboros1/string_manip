@@ -5,6 +5,7 @@
 //   region overhead  acquire/release with other pools already held
 //   churn            a long-lived table of strings, updated in place
 //   growth           building a string by appending
+//   recent lines     keeping the last lines seen: a ring vs strdup/free
 
 #include "bench.h"
 #include "faf.h"
@@ -429,6 +430,80 @@ static void growth(void) {
   }
 }
 
+/* ---- 5. Recent lines: a ring vs strdup/free ---- */
+
+#define RECENT_STEPS 20000
+#define RECENT_BACK 32   // each step reads the line pushed this many steps ago
+#define RECENT_SLOTS 64  // malloc: lines kept (a power of two)
+#define RING_BYTES 4096
+
+static size_t recent_hits, recent_peak;
+
+static void recent_ring(void) {
+  static char buf[RING_BYTES];
+  static faf_ring_ref refs[RECENT_BACK];
+  faf_ring ring;
+  faf_ring_init(&ring, buf, sizeof buf);
+  recent_hits = 0;
+  size_t acc = 0;
+  for (int step = 0; step < RECENT_STEPS; ++step) {
+    int i = step % NLINES;
+    int k = step % RECENT_BACK;
+    if (step >= RECENT_BACK) {
+      faf_string old = faf_ring_get(&ring, refs[k]);
+      if (!faf_string_is_none(old)) {
+        acc += faf_string_len(old) + (unsigned char)old.start[0];
+        recent_hits++;
+      }
+    }
+    refs[k] = faf_ring_push(&ring, faf_string_init_n(lines[i], line_lens[i]));
+  }
+  sink = acc;
+}
+
+static void recent_malloc(void) {
+  static char *kept[RECENT_SLOTS];
+  static size_t kept_len[RECENT_SLOTS];
+  recent_hits = 0;
+  recent_peak = 0;
+  size_t acc = 0, live = 0;
+  for (int step = 0; step < RECENT_STEPS; ++step) {
+    int i = step % NLINES;
+    if (step >= RECENT_BACK) {
+      int k = (step - RECENT_BACK) % RECENT_SLOTS;
+      acc += kept_len[k] + (unsigned char)kept[k][0];
+      recent_hits++;
+    }
+    int k = step % RECENT_SLOTS;
+    if (kept[k]) {
+      live -= kept_len[k] + 1;
+      free(kept[k]);
+    }
+    kept[k] = strndup(lines[i], line_lens[i]);
+    kept_len[k] = line_lens[i];
+    live += line_lens[i] + 1;
+    if (live > recent_peak)
+      recent_peak = live;
+  }
+  for (int k = 0; k < RECENT_SLOTS; ++k) {
+    free(kept[k]);
+    kept[k] = NULL;
+  }
+  sink = acc;
+}
+
+static void recent_lines(void) {
+  section("Recent lines",
+          "keep the lines seen lately; each step stores a line and reads the "
+          "one from 32 steps ago; ns per step");
+  group_begin(NULL, NS_PER_OP);
+  BENCH("ring, 4 KB buffer", RECENT_STEPS, recent_ring());
+  group_note("%zu of %d reads still there", recent_hits,
+             RECENT_STEPS - RECENT_BACK);
+  BENCH("malloc: strdup + free", RECENT_STEPS, recent_malloc());
+  group_note("64 lines kept, peak %.1f KB requested", recent_peak / 1024.0);
+}
+
 void bench_alloc(void) {
   for (size_t i = 0; i < sizeof src; ++i)
     src[i] = (char)('a' + i % 26);
@@ -436,5 +511,6 @@ void bench_alloc(void) {
   region_overhead();
   churn_benches();
   growth();
+  recent_lines();
   group_end();
 }

@@ -16,6 +16,7 @@ Include `faf.h` for everything, or the individual headers:
 | `faf_string_case.h` | `to_lower`, `to_upper`, `eq_icase`, `cmp_icase` |
 | `faf_string_cmp.h`, `faf_string_concat.h` | `cmp` (unsigned bytes, like `memcmp`), `concat` |
 | `faf_string_parse.h` | `parse_i64` / `parse_u64` / `parse_f64`, `from_i64` / `from_u64`, `is_ascii`, `utf8_valid` |
+| `faf_string_ring.h` | `faf_ring`: a ring of strings over your buffer; old strings are overwritten, and handles detect it (`push`, `get`, `valid`) |
 | `faf_string_hash.h`, `faf_string_sort.h` | 64 bit `hash`, `sort_chars`, `arr_sort` |
 
 Functions that allocate take a `faf_region` and return `FAF_STRING_NONE` when the region is out of space. Everything allocated from a region is freed at once by `faf_region_release`.

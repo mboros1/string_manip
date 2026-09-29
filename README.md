@@ -24,6 +24,9 @@ change.
   checked handles, and a result of `FAF_STRING_NONE` when a region is full.
   Pool count, size and placement are build options, down to a few hundred
   bytes for a microcontroller.
+- **Rings**: for data that is safe to lose (recent log lines, caches), a ring
+  of strings over a buffer you provide, where handles detect overwritten
+  strings with one compare.
 - **Byte kernels**: everything architecture-specific is 12 small kernels
   (find, count, strlen, compare, case...). The rest is portable C on top.
 - **Freestanding**: no libc beyond `memcpy`/`memset`, which every C compiler

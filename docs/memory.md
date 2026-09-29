@@ -25,6 +25,23 @@ has, or guard pages (`mmap`) that a microcontroller lacks, declares it with
 `TEST_REQUIRE(condition, reason)` and is reported as SKIPPED. `make check_small`
 runs the suite with 2 × 1 KB pools.
 
+## Rings
+
+Regions are for data whose lifetime you know. For data you can afford to lose
+(recent log lines, a cache of rendered text, telemetry), `faf_ring`
+(`faf_string_ring.h`) stores strings in a buffer you provide and overwrites
+the oldest ones when it is full. Memory is bounded by construction, and pushes
+never fail for lack of room. Each push returns a handle; `faf_ring_get` gives
+the string back, or `FAF_STRING_NONE` once it has been overwritten.
+
+The check is one compare: the ring counts every byte ever written (64 bits,
+so it never wraps), each handle holds that count at its string's start, and a
+string is intact while `head - pos <= capacity`. A string returned by
+`faf_ring_get` points into the buffer, so use it before pushing more, copy it
+out, or check `faf_ring_valid` again afterwards.
+
+## Code placement
+
 On the ESP32, where code runs from flash through a cache, put hot string code
 in IRAM (a linker fragment, as in `bench/esp32/main/linker.lf`): flash cache
 misses moved benchmark results by up to 80% between builds.
