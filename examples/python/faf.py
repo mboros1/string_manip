@@ -1,20 +1,21 @@
 """FaF strings from Python: a ctypes shim over the batch API (src/faf_batch.h).
 
-The shim is the list of declarations in _declare(); everything else is a small
-convenience layer. It needs only the standard library (ctypes, array, mmap);
-numpy and pyarrow are used for conversions when installed.
+The shim is the list of declarations in _declare(); the rest ties batches to
+Python objects and garbage collection. It needs only the standard library
+(ctypes, array, mmap); numpy and pyarrow are used for conversions when
+installed.
 
     import faf
     buf = faf.Buffer.from_file("app.log")      # mmap, nothing is copied
-    lines = buf.lines()                         # views: 16 bytes per line
+    lines = buf.lines()                         # a batch: views, in C
     errors = lines.filter(lines.contains(b"ERROR"))
     print(len(errors), errors.head(3))
-    out = errors.lower().join(b"\\n")           # bytes are made here, once
+    out = errors.lower().join(b"\\n")           # bytes for Python are made here
 
 Strings are bytes, and case functions are ASCII only, as in the C library.
-A Batch holds views: string i is data[starts[i]:ends[i]] of its Buffer, which
-it keeps alive. Only indexing (b[i], iteration, head) and join/compact/lower
-create bytes on the Python side.
+A Batch is a handle to a batch in a faf arena. Results that make new
+strings (lower, upper, compact) live in the arena too; each batch gives its
+region back when Python collects it.
 """
 
 import ctypes
@@ -26,7 +27,7 @@ import threading
 from array import array
 from ctypes import c_char, c_int, c_int64, c_size_t, c_uint64, c_void_p
 
-__all__ = ["Arena", "Buffer", "Batch", "lib", "use_arena"]
+__all__ = ["Arena", "Buffer", "Batch", "lib", "to_numpy"]
 
 
 # ---- The shim: load the library and declare the functions ----
@@ -40,37 +41,32 @@ def _find_library():
 
 
 def _declare(lib):
-    P = c_void_p  # every pointer: data, starts/ends, outputs
+    P, B = c_void_p, c_uint64  # pointers; batch handles
     sig = {
-        "faf_batch_split_count": (c_size_t, [P, c_size_t, c_char]),
-        "faf_batch_split": (c_size_t, [P, c_size_t, c_char, P, P, c_size_t]),
-        "faf_batch_select": (c_size_t, [P, P, c_size_t, P, P, P]),
-        "faf_batch_take": (None, [P, P, P, c_size_t, P, P]),
-        "faf_batch_lengths": (None, [P, P, c_size_t, P]),
-        "faf_batch_total": (c_int64, [P, P, c_size_t]),
-        "faf_batch_find": (None, [P, P, P, c_size_t, P, c_size_t, P]),
-        "faf_batch_count": (None, [P, P, P, c_size_t, P, c_size_t, P]),
-        "faf_batch_hash": (None, [P, P, P, c_size_t, c_uint64, P]),
-        "faf_batch_compact": (None, [P, P, P, c_size_t, P, P]),
-        "faf_batch_ascii_case": (None, [P, P, P, c_size_t, c_int, P, P]),
-        "faf_batch_join": (c_int64, [P, P, P, c_size_t, P, c_size_t, P]),
-        "faf_batch_span": (c_int64, [P, P, c_size_t, P]),
-        "faf_batch_ascii_case_span": (None, [P, P, P, c_size_t, c_int, P, P, P]),
-        "faf_batch_ascii_case_inplace": (None, [P, P, P, c_size_t, c_int]),
-        "faf_batch_ascii_case_range": (None, [P, c_int64, c_int64, c_int, P]),
+        "faf_arena_size": (c_size_t, []),
+        "faf_arena_bytes": (c_size_t, [c_size_t, c_size_t]),
+        "faf_arena_init": (ctypes.c_bool, [P, P, c_size_t, c_size_t]),
+        "faf_batch_split": (B, [P, P, c_size_t, c_char]),
+        "faf_batch_from_offsets": (B, [P, P, P, c_size_t]),
+        "faf_batch_free": (None, [B]),
+        "faf_batch_len": (c_size_t, [B]),
+        "faf_batch_data": (P, [B]),
+        "faf_batch_starts": (P, [B]),
+        "faf_batch_ends": (P, [B]),
+        "faf_batch_total": (c_int64, [B]),
+        "faf_batch_lengths": (None, [B, P]),
+        "faf_batch_find": (None, [B, P, c_size_t, P]),
+        "faf_batch_count": (None, [B, P, c_size_t, P]),
+        "faf_batch_hash": (None, [B, c_uint64, P]),
+        "faf_batch_select": (B, [P, B, P]),
+        "faf_batch_take": (B, [P, B, P, c_size_t]),
+        "faf_batch_ascii_case": (B, [P, B, c_int]),
+        "faf_batch_compact": (B, [P, B]),
+        "faf_batch_ascii_case_inplace": (None, [B, c_int]),
+        "faf_batch_join": (c_int64, [B, P, c_size_t, P]),
     }
     for name in ("contains", "starts_with", "ends_with", "eq", "eq_icase"):
-        sig[f"faf_batch_{name}"] = (c_size_t, [P, P, P, c_size_t, P, c_size_t, P])
-    if hasattr(lib, "faf_ffi_arena_size"):  # built with arenas (the default)
-        sig.update({
-            "faf_ffi_arena_size": (c_size_t, []),
-            "faf_ffi_arena_bytes": (c_size_t, [c_size_t, c_size_t]),
-            "faf_ffi_arena_init": (ctypes.c_bool, [P, P, c_size_t, c_size_t]),
-            "faf_ffi_region_acquire": (c_uint64, [P]),
-            "faf_ffi_region_capacity": (c_size_t, [P]),
-            "faf_ffi_reserve": (P, [P, c_uint64, c_size_t]),
-            "faf_ffi_region_release": (None, [P, c_uint64]),
-        })
+        sig[f"faf_batch_{name}"] = (c_size_t, [B, P, c_size_t, P])
     for name, (restype, argtypes) in sig.items():
         fn = getattr(lib, name)
         fn.restype, fn.argtypes = restype, argtypes
@@ -81,7 +77,7 @@ def _declare(lib):
 lib = _declare(ctypes.CDLL(_find_library()))
 
 
-# ---- Addresses of Python buffers ----
+# ---- Memory ----
 
 def _address(obj):
     """Address of the bytes of `obj` (bytes, bytearray, array, mmap, ...)."""
@@ -96,96 +92,52 @@ def _address(obj):
     return ctypes.addressof(c_char.from_buffer(obj))
 
 
-# Where empty buffers point: a real byte, never read (lengths are 0).
-_EMPTY = b"\0"
-_EMPTY_ADDR = ctypes.cast(ctypes.c_char_p(_EMPTY), c_void_p).value
-
-
-# ---- Result memory from a faf arena ----
-
 class Arena:
-    """faf arena for results: `npools` regions of `pool_bytes`, over an
-    anonymous mapping (the OS maps pages only when they're first written, so
-    an unused arena costs address space, not memory). Each result that fits
-    takes a region and gives it back when it is garbage collected, so later
-    results reuse memory that is already mapped instead of faulting in new
-    pages. Pages stay mapped while the arena lives, as in any memory pool."""
+    """A faf arena over one anonymous mapping: `npools` regions of up to
+    `pool_bytes` each (every live batch holds one). The OS maps pages only
+    when they're first written, so large pools cost address space, not
+    memory; pages a result touched stay mapped for the next one. If the OS
+    won't reserve that much, pools are halved until it does."""
 
-    def __init__(self, pool_bytes=256 << 20, npools=8):
-        nbytes = lib.faf_ffi_arena_bytes(npools, pool_bytes)
-        if not nbytes:
-            raise ValueError("arena too large")
-        self._mem = mmap.mmap(-1, nbytes)
-        self._state = ctypes.create_string_buffer(lib.faf_ffi_arena_size())
-        self._base = _address(self._mem)
-        if not lib.faf_ffi_arena_init(self._state, self._base, nbytes, npools):
-            raise ValueError("arena too small")
-        self.capacity = lib.faf_ffi_region_capacity(self._state)
-        # results can be dropped (and give back their region) on any thread
-        self._lock = threading.Lock()
+    def __init__(self, pool_bytes=1 << 30, npools=64):
+        while True:
+            nbytes = lib.faf_arena_bytes(npools, pool_bytes)
+            try:
+                self._mem = mmap.mmap(-1, nbytes)
+                break
+            except (OSError, OverflowError):
+                if pool_bytes <= 1 << 20:
+                    raise
+                pool_bytes //= 2
+        self.pool_bytes = pool_bytes
+        self._state = ctypes.create_string_buffer(lib.faf_arena_size())
+        if not lib.faf_arena_init(self._state, _address(self._mem), nbytes, npools):
+            raise MemoryError("faf arena: no free arena table entry")
+        # batches are made and freed (by garbage collection) on any thread
+        self.lock = threading.Lock()
 
-    def take(self, size):
-        """(writable memoryview of `size` bytes, lease), or None if it
-        doesn't fit or every region is in use. Keep the lease with the
-        memory: dropping it gives the region back."""
-        if size > self.capacity:
-            return None
-        with self._lock:
-            h = lib.faf_ffi_region_acquire(self._state)
-            if not h:
-                return None
-            p = lib.faf_ffi_reserve(self._state, h, size)
-            if not p:
-                lib.faf_ffi_region_release(self._state, h)
-                return None
-        off = p - self._base
-        return memoryview(self._mem)[off:off + size], _Lease(self, h)
+    def _make(self, fn, *args):
+        with self.lock:
+            h = fn(self._state, *args)
+        if not h:
+            raise MemoryError("faf: no free region, or the result is larger "
+                              f"than one ({self.pool_bytes} bytes)")
+        return h
 
-    def _release(self, h):
-        with self._lock:
-            lib.faf_ffi_region_release(self._state, h)
-
-
-class _Lease:
-    __slots__ = ("arena", "handle")
-
-    def __init__(self, arena, handle):
-        self.arena, self.handle = arena, handle
-
-    def __del__(self):
-        self.arena._release(self.handle)
+    def _free(self, h):
+        with self.lock:
+            lib.faf_batch_free(h)
 
 
 _arena = None
-_arena_on = hasattr(lib, "faf_ffi_arena_size")
 
 
-def use_arena(arena):
-    """Results from `arena` (an Arena), or from new bytearrays (None)."""
-    global _arena, _arena_on
-    _arena, _arena_on = arena, arena is not None
-
-
-def _default_arena():
+def arena():
+    """The arena batches come from (made on first use)."""
     global _arena
-    if _arena is None and _arena_on:
+    if _arena is None:
         _arena = Arena()
     return _arena
-
-
-class _Ints:
-    """n int64 values starting at element `first` of `owner` (kept alive)."""
-
-    __slots__ = ("owner", "addr", "view")
-
-    def __init__(self, owner, first, n):
-        self.owner = owner
-        self.addr = _address(owner) + 8 * first if n else 0
-        self.view = memoryview(owner).cast("B").cast("q")[first:first + n]
-
-
-def _zeros(typecode, n):
-    return array(typecode, [0]) * n
 
 
 def _needle(b):
@@ -194,17 +146,19 @@ def _needle(b):
     return b, len(b)
 
 
+def _zeros(typecode, n):
+    return array(typecode, [0]) * n
+
+
 # ---- Buffer and Batch ----
 
 class Buffer:
     """Bytes to take views of: a file (mapped), bytes, bytearray, ..."""
 
-    def __init__(self, obj, lease=None):
+    def __init__(self, obj):
         self.obj = obj
-        self.lease = lease  # arena memory: given back when this goes away
         self.nbytes = len(obj)
-        self.addr = _address(obj) if self.nbytes else _EMPTY_ADDR
-        self.view = memoryview(obj).cast("B")
+        self.addr = _address(obj) if self.nbytes else None
 
     @classmethod
     def from_file(cls, path):
@@ -219,52 +173,57 @@ class Buffer:
     def from_bytes(cls, data):
         return cls(data)
 
-    def split(self, sep=b"\n"):
+    def split(self, sep=b"\n", _len=None):
         """Views of the pieces between `sep` bytes, like bytes.split(sep)."""
         sep = sep if isinstance(sep, bytes) else sep.encode()
         if len(sep) != 1:
             raise ValueError("split separator must be one byte")
-        n = lib.faf_batch_split_count(self.addr, self.nbytes, sep)
-        starts, ends = _zeros("q", n), _zeros("q", n)
-        lib.faf_batch_split(self.addr, self.nbytes, sep, _address(starts),
-                            _address(ends), n)
-        return Batch(self, _Ints(starts, 0, n), _Ints(ends, 0, n), dense=True)
+        n = self.nbytes if _len is None else _len
+        a = arena()
+        return Batch(a._make(lib.faf_batch_split, self.addr, n, sep), a, self)
 
     def lines(self):
         """Like split(b"\\n"), without the empty piece after a final newline
         (so an empty buffer has no lines, like bytes.splitlines)."""
-        b = self.split(b"\n")
-        if not self.nbytes or self.view[-1] == ord("\n"):
-            b = b._first(len(b) - 1)
-        return b
+        if not self.nbytes:
+            return Batch.from_list([])
+        ends_nl = self.obj[self.nbytes - 1] in (10, b"\n")
+        return self.split(b"\n", self.nbytes - 1 if ends_nl else None)
 
 
 class Batch:
-    """n views into one Buffer: string i is data[starts[i]:ends[i]].
+    """A batch in a faf arena: n views into one byte buffer. `keep` holds the
+    Python objects its views point into, so they outlive it."""
 
-    `dense` batches have their views in order with at most a separator
-    between them (made by split, from offsets, or from another dense batch
-    keeping its views): the range they cover is known without scanning."""
+    def __init__(self, handle, arena_, keep=None):
+        self.handle, self.arena, self.keep = handle, arena_, keep
+        self.n = lib.faf_batch_len(handle)
 
-    def __init__(self, buffer, starts, ends, dense=False):
-        self.buffer, self.starts, self.ends = buffer, starts, ends
-        self.n = len(starts.view)
-        self.dense = dense
+    def __del__(self):
+        if getattr(self, "handle", 0):
+            try:
+                self.arena._free(self.handle)
+            except Exception:  # interpreter shutdown: the library may be gone
+                pass
+            self.handle = 0
 
     # -- constructors --
 
     @classmethod
-    def _from_offsets(cls, buffer, offsets, first, n):
-        # Arrow layout: string i is data[off[i]:off[i + 1]]
-        return cls(buffer, _Ints(offsets, first, n), _Ints(offsets, first + 1, n),
-                   dense=True)
+    def from_offsets(cls, data, offsets, n, first=0):
+        """Arrow layout: string i is data[offsets[first + i] : ...[first + i + 1]].
+        Nothing is copied; the batch keeps `data` and `offsets` alive."""
+        a = arena()
+        d = _address(data) if len(data) else None
+        o = _address(offsets) + 8 * first
+        return cls(a._make(lib.faf_batch_from_offsets, d, o, n), a, (data, offsets))
 
     @classmethod
     def from_list(cls, items):
         """From a list of str (UTF-8 encoded) or bytes: this copies."""
         bs = [s.encode() if isinstance(s, str) else s for s in items]
         offsets = array("q", itertools.accumulate(map(len, bs), initial=0))
-        return cls._from_offsets(Buffer(b"".join(bs)), offsets, 0, len(bs))
+        return cls.from_offsets(b"".join(bs), offsets, len(bs))
 
     @classmethod
     def from_arrow(cls, arr):
@@ -277,26 +236,34 @@ class Batch:
             raise ValueError("arrays with nulls are not supported")
         if pa.types.is_string(arr.type) or pa.types.is_binary(arr.type):
             arr = arr.cast(pa.large_binary())
-        _, off_buf, data_buf = arr.buffers()
-        data = Buffer(data_buf if data_buf is not None and data_buf.size else b"")
-        return cls._from_offsets(data, off_buf, arr.offset, len(arr))
+        _, off, data = arr.buffers()
+        data = data if data is not None and data.size else b""
+        # the batch keeps both buffers, which keep their memory alive
+        return cls.from_offsets(data, off, len(arr), first=arr.offset)
 
-    # -- views --
+    # -- reading --
 
     def __len__(self):
         return self.n
+
+    def _views(self):
+        n = self.n
+        s = (c_int64 * n).from_address(lib.faf_batch_starts(self.handle)) if n else ()
+        e = (c_int64 * n).from_address(lib.faf_batch_ends(self.handle)) if n else ()
+        return lib.faf_batch_data(self.handle), s, e
 
     def __getitem__(self, i):
         if i < 0:
             i += self.n
         if not 0 <= i < self.n:
             raise IndexError(i)
-        return bytes(self.buffer.view[self.starts.view[i]:self.ends.view[i]])
+        d, s, e = self._views()
+        return ctypes.string_at(d + s[i], e[i] - s[i]) if e[i] > s[i] else b""
 
     def __iter__(self):
-        v, s, e = self.buffer.view, self.starts.view, self.ends.view
+        d, s, e = self._views()
         for i in range(self.n):
-            yield bytes(v[s[i]:e[i]])
+            yield ctypes.string_at(d + s[i], e[i] - s[i]) if e[i] > s[i] else b""
 
     def head(self, k=5):
         return [self[i] for i in range(min(k, self.n))]
@@ -305,197 +272,118 @@ class Batch:
         more = ", ..." if self.n > 3 else ""
         return f"<faf.Batch of {self.n}: {self.head(3)!r}{more}>"
 
-    def _first(self, m):
-        return Batch(self.buffer, _Ints(self.starts.owner, self._pos(self.starts), m),
-                     _Ints(self.ends.owner, self._pos(self.ends), m), self.dense)
-
-    @staticmethod
-    def _pos(ints):
-        # element index of ints.view[0] in its owner
-        return (ints.addr - _address(ints.owner)) // 8 if ints.addr else 0
-
-    def _args(self):
-        return self.buffer.addr, self.starts.addr, self.ends.addr, self.n
-
     # -- per string results --
 
-    def lengths(self):
-        out = _zeros("q", self.n)
-        lib.faf_batch_lengths(self.starts.addr, self.ends.addr, self.n, _address(out))
+    def _out(self, typecode, fn, *args):
+        out = _zeros(typecode, self.n)
+        fn(self.handle, *args, _address(out) if self.n else None)
         return out
+
+    def lengths(self):
+        return self._out("q", lib.faf_batch_lengths)
 
     def total(self):
         """Sum of the lengths."""
-        return lib.faf_batch_total(self.starts.addr, self.ends.addr, self.n)
+        return lib.faf_batch_total(self.handle)
 
     def find(self, needle):
         """Index of the first needle in each string, or -1."""
-        out = _zeros("q", self.n)
-        lib.faf_batch_find(*self._args(), *_needle(needle), _address(out))
-        return out
+        return self._out("q", lib.faf_batch_find, *_needle(needle))
 
     def count(self, needle):
         """Non-overlapping occurrences of needle in each string."""
-        out = _zeros("q", self.n)
-        lib.faf_batch_count(*self._args(), *_needle(needle), _address(out))
-        return out
-
-    def _test(self, fn, needle):
-        out = _zeros("B", self.n)
-        fn(*self._args(), *_needle(needle), _address(out))
-        return out
+        return self._out("q", lib.faf_batch_count, *_needle(needle))
 
     def contains(self, needle):
         """A mask: 1 where the string contains needle."""
-        return self._test(lib.faf_batch_contains, needle)
+        return self._out("B", lib.faf_batch_contains, *_needle(needle))
 
     def startswith(self, prefix):
-        return self._test(lib.faf_batch_starts_with, prefix)
+        return self._out("B", lib.faf_batch_starts_with, *_needle(prefix))
 
     def endswith(self, suffix):
-        return self._test(lib.faf_batch_ends_with, suffix)
+        return self._out("B", lib.faf_batch_ends_with, *_needle(suffix))
 
     def eq(self, other):
-        return self._test(lib.faf_batch_eq, other)
+        return self._out("B", lib.faf_batch_eq, *_needle(other))
 
     def eq_icase(self, other):
-        return self._test(lib.faf_batch_eq_icase, other)
+        return self._out("B", lib.faf_batch_eq_icase, *_needle(other))
 
     def hash(self, seed=0):
-        out = _zeros("Q", self.n)
-        lib.faf_batch_hash(*self._args(), seed, _address(out))
-        return out
+        return self._out("Q", lib.faf_batch_hash, seed)
 
-    # -- selection: new views, no bytes copied --
+    # -- new batches --
+    # select/take view the same bytes, so the result keeps this batch alive;
+    # lower/upper/compact own their bytes.
+
+    def _new(self, fn, *args, keep=None):
+        a = arena()
+        return Batch(a._make(fn, self.handle, *args), a, keep)
 
     def filter(self, mask):
         """The strings where mask is non-zero (mask: array('B'), bytes, ...)."""
         if len(mask) != self.n:
             raise ValueError("mask length differs from the batch")
-        starts, ends = _zeros("q", self.n), _zeros("q", self.n)
-        m = lib.faf_batch_select(self.starts.addr, self.ends.addr, self.n,
-                                 _address(mask) if self.n else 0,
-                                 _address(starts), _address(ends))
-        return Batch(self.buffer, _Ints(starts, 0, m), _Ints(ends, 0, m))
+        return self._new(lib.faf_batch_select, _address(mask) if self.n else None,
+                         keep=self)
 
     def take(self, indices):
         """The strings at `indices` (array('q'), or any iterable of ints)."""
         idx = indices if isinstance(indices, array) and indices.typecode == "q" \
             else array("q", indices)
-        m = len(idx)
-        if m and (min(idx) < 0 or max(idx) >= self.n):
+        if idx and (min(idx) < 0 or max(idx) >= self.n):
             raise IndexError("take: index out of range")
-        starts, ends = _zeros("q", m), _zeros("q", m)
-        lib.faf_batch_take(self.starts.addr, self.ends.addr, _address(idx) if m else 0,
-                           m, _address(starts), _address(ends))
-        return Batch(self.buffer, _Ints(starts, 0, m), _Ints(ends, 0, m))
+        return self._new(lib.faf_batch_take, _address(idx) if idx else None,
+                         len(idx), keep=self)
 
-    # -- new bytes --
-    # Each takes `out`: a bytearray to write into instead of a new one (it
-    # must be big enough; a batch returned earlier that used it sees the new
-    # bytes). Reusing one saves allocating, zero filling and first touching
-    # fresh memory on every call, which costs more than the conversion.
+    def lower(self, inplace=False):
+        """ASCII lower case. inplace=True changes the strings' own bytes (a
+        batch over a bytearray only; other batches over it see the change)."""
+        return self._case(0, inplace)
 
-    @staticmethod
-    def _output(out, size):
-        """A Buffer of at least `size` writable bytes: `out`, else a region
-        of the arena, else a new bytearray."""
-        if out is not None:
-            if not isinstance(out, bytearray):
-                raise TypeError("out must be a bytearray")
-            if len(out) < size:
-                raise ValueError(f"out is {len(out)} bytes, {size} needed")
-            return Buffer(out)
-        arena = _default_arena()
-        got = arena.take(size) if arena and size else None
-        if got:
-            return Buffer(got[0], lease=got[1])
-        return Buffer(bytearray(size))
+    def upper(self, inplace=False):
+        return self._case(1, inplace)
 
-    def _into_new(self, fill, out):
-        total = self.total()
-        dst, offsets = self._output(out, total), _zeros("q", self.n + 1)
-        fill(dst.addr, _address(offsets))
-        return Batch._from_offsets(dst, offsets, 0, self.n)
-
-    def compact(self, out=None):
-        """A copy with the strings end to end (Arrow layout)."""
-        return self._into_new(
-            lambda d, o: lib.faf_batch_compact(*self._args(), d, o), out)
-
-    def _case(self, upper, out, inplace):
+    def _case(self, upper, inplace):
         if inplace:
-            # only for memory the caller owns and may change: bytes are
-            # immutable, and a mapped file would copy each page on write
-            if not isinstance(self.buffer.obj, bytearray):
+            owner = self._owner()
+            if not isinstance(owner, bytearray):
                 raise TypeError("inplace needs a batch over a bytearray")
-            lib.faf_batch_ascii_case_inplace(*self._args(), upper)
+            lib.faf_batch_ascii_case_inplace(self.handle, upper)
             return self
-        if self.dense and self.n and self.starts.view[0] == 0:
-            # the range is known, [0, last end): no scan of the views, one
-            # kernel call, and the same views into the result
-            span = self.ends.view[self.n - 1]
-            dst = self._output(out, span)
-            lib.faf_batch_ascii_case_range(self.buffer.addr, 0, span, upper, dst.addr)
-            return Batch(dst, self.starts, self.ends, dense=True)
-        lo = c_int64()
-        span = lib.faf_batch_span(self.starts.addr, self.ends.addr, self.n,
-                                  ctypes.byref(lo))
-        if span > 2 * self.total():
-            # sparse views (e.g. after a selective filter): convert and pack
-            # just the strings
-            return self._into_new(lambda d, o: lib.faf_batch_ascii_case(
-                *self._args(), upper, d, o), out)
-        # dense views (e.g. the lines of a file): one pass over the range they
-        # cover, and the same views into the result
-        dst = self._output(out, span)
-        if lo.value == 0:
-            lib.faf_batch_ascii_case_span(*self._args(), upper, dst.addr, None, None)
-            return Batch(dst, self.starts, self.ends, self.dense)
-        starts, ends = _zeros("q", self.n), _zeros("q", self.n)
-        lib.faf_batch_ascii_case_span(*self._args(), upper, dst.addr,
-                                      _address(starts), _address(ends))
-        return Batch(dst, _Ints(starts, 0, self.n), _Ints(ends, 0, self.n))
+        return self._new(lib.faf_batch_ascii_case, upper)
 
-    def lower(self, out=None, inplace=False):
-        """ASCII lower case. inplace=True changes the strings' own bytes
-        (only for a batch over a bytearray; other batches over the same
-        buffer see the change) and returns this batch."""
-        return self._case(0, out, inplace)
+    def _owner(self):
+        # the Python object this batch's bytes are in, if any
+        k = self.keep
+        while isinstance(k, Batch):
+            k = k.keep
+        return k.obj if isinstance(k, Buffer) else None
 
-    def upper(self, out=None, inplace=False):
-        return self._case(1, out, inplace)
+    def compact(self):
+        """A copy with the strings end to end (Arrow layout)."""
+        return self._new(lib.faf_batch_compact)
 
-    def join(self, sep=b"\n", out=None):
-        """The strings joined by sep, as a bytearray (e.g. to write out). With
-        `out`, only its first len(result) bytes are written: the return value
-        is a memoryview of them."""
+    def join(self, sep=b"\n"):
+        """The strings joined by sep, as a bytearray (e.g. to write out)."""
         sep, m = _needle(sep)
-        size = self.total() + m * max(self.n - 1, 0)
-        # the result is the caller's to keep: a bytearray, not arena memory
-        dst = bytearray(size) if out is None else self._output(out, size).obj
-        lib.faf_batch_join(*self._args(), sep, m, _address(dst) if size else _EMPTY_ADDR)
-        return dst if out is None else memoryview(dst)[:size]
+        dst = bytearray(self.total() + m * max(self.n - 1, 0))
+        lib.faf_batch_join(self.handle, sep, m, _address(dst) if dst else None)
+        return dst
 
     # -- conversions (optional dependencies) --
 
     def to_arrow(self):
-        """A pyarrow large_binary array (copies unless already compact)."""
+        """A pyarrow large_binary array, copied out of the arena (pyarrow may
+        keep it longer than this batch lives)."""
         import pyarrow as pa
-        # arena memory is reused once this batch is gone, and pyarrow could
-        # keep it longer: copy into a bytearray the array owns
-        c = self if self._is_compact() else \
-            self.compact(out=bytearray(self.total()))
-        off = pa.py_buffer(c.starts.owner)
-        data = pa.py_buffer(c.buffer.obj)
-        return pa.Array.from_buffers(pa.large_binary(), c.n, [None, off, data],
-                                     offset=self._pos(c.starts))
-
-    def _is_compact(self):
-        return (self.starts.owner is self.ends.owner and
-                self.ends.addr == self.starts.addr + 8 and
-                isinstance(self.starts.owner, array) and
-                isinstance(self.buffer.obj, (bytes, bytearray)))
+        c = self.compact()
+        d, s, e = c._views()
+        offsets = array("q", s) + array("q", [e[-1] if c.n else 0])
+        data = ctypes.string_at(d, c.total()) if c.total() else b""
+        return pa.Array.from_buffers(pa.large_binary(), c.n,
+                                     [None, pa.py_buffer(offsets), pa.py_buffer(data)])
 
 
 def to_numpy(result):

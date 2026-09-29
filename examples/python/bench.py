@@ -16,6 +16,7 @@ variant's results are checked against the others before its time counts.
 """
 
 import argparse
+from array import array
 import gc
 import json
 import os
@@ -135,8 +136,6 @@ def faf_ops():
         "startswith": lambda b, nd: b.startswith(b"2026-09-29T12:0"),
         "lengths": lambda b, nd: b.lengths(),
         "lower": lambda b, nd: b.lower(),
-        # a result buffer allocated once and reused (see run_ops)
-        "lower (reused out)": lambda b, nd: b.lower(out=b._bench_out),
         "hash": lambda b, nd: b.hash(),
         "filter contains": lambda b, nd: b.filter(b.contains(nd)),
     }
@@ -150,7 +149,6 @@ def py_ops():
         "startswith": lambda ls, nd: [s.startswith(b"2026-09-29T12:0") for s in ls],
         "lengths": lambda ls, nd: [len(s) for s in ls],
         "lower": lambda ls, nd: [s.lower() for s in ls],
-        "lower (reused out)": lambda ls, nd: [s.lower() for s in ls],
         # bytes objects cache their hash: see run_ops, which hashes fresh copies
         "hash": lambda ls, nd: [hash(s) for s in ls],
         "filter contains": lambda ls, nd: [s for s in ls if nd in s],
@@ -167,7 +165,6 @@ def pa_ops():
         "startswith": lambda a, nd: pc.starts_with(a, "2026-09-29T12:0"),
         "lengths": lambda a, nd: pc.binary_length(a),
         "lower": lambda a, nd: pc.ascii_lower(a),
-        "lower (reused out)": lambda a, nd: pc.ascii_lower(a),
         # pyarrow has no per-string hash kernel
         "filter contains": lambda a, nd: a.filter(pc.match_substring(a, nd.decode())),
     }
@@ -177,7 +174,7 @@ def comparable(op, impl, out):
     """Results as plain lists, to check the variants agree."""
     if out is None:
         return None
-    if op in ("lower", "lower (reused out)", "filter contains"):
+    if op in ("lower", "filter contains"):
         if impl == "pa":
             return [v.encode() if isinstance(v, str) else v for v in out.to_pylist()]
         return list(out)
@@ -222,7 +219,6 @@ def section_ops(args):
 def run_ops(title, lines, needle, args, collect, length, ops=None):
     data = b"\n".join(lines)
     batch = faf.Buffer.from_bytes(data).split(b"\n")
-    batch._bench_out = bytearray(len(data))
     arr = pa.array(lines, pa.large_string()) if pa else None
     n = len(lines)
     fo, po, ao = faf_ops(), py_ops(), pa_ops()
@@ -309,9 +305,11 @@ def cold_lower_worker(impl, length, total):
         if impl == "pyarrow":
             arr = pa.array(lines, pa.large_string())
         else:  # the same array, handed over without a builder
-            b = faf.Batch.from_list(lines)
-            arr = pa.Array.from_buffers(pa.large_string(), b.n, [
-                None, pa.py_buffer(b.starts.owner), pa.py_buffer(b.buffer.obj)])
+            data, offsets = b"".join(lines), array("q", [0])
+            for s in lines:
+                offsets.append(offsets[-1] + len(s))
+            arr = pa.Array.from_buffers(pa.large_string(), len(lines), [
+                None, pa.py_buffer(offsets), pa.py_buffer(data)])
         fn = lambda: pc.ascii_lower(arr)  # noqa: E731
         pc.ascii_lower(pa.array(["A"]))  # start the compute engine first
     del lines

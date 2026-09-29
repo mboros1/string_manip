@@ -91,7 +91,8 @@ def check_batch(batch, ref, what):
     mask = array("B", [rng.randrange(2) for _ in ref])
     kept = batch.filter(mask)
     assert list(kept) == [s for s, m in zip(ref, mask) if m], what
-    assert kept.buffer is batch.buffer, what
+    if ref:  # views of the same bytes, not a copy
+        assert faf.lib.faf_batch_data(kept.handle) == faf.lib.faf_batch_data(batch.handle)
     idx = [rng.randrange(len(ref)) for _ in range(len(ref) // 2)] if ref else []
     assert list(batch.take(idx)) == [ref[i] for i in idx], what
     # chained: filter then transform
@@ -168,33 +169,12 @@ def test_case_modes():
     data = random_data(200, 60) + b"\n"
     ref = data.split(b"\n")
     lines = faf.Buffer.from_bytes(data).split()
-    # dense: one pass over the span, and the views are reused (they start at 0)
-    dense = lines.lower()
-    assert list(dense) == [ascii_lower(s) for s in ref]
-    assert dense.starts is lines.starts, "span mode should reuse views at 0"
-    # dense but not starting at 0
+    assert list(lines.lower()) == [ascii_lower(s) for s in ref]  # one pass
     tail = lines.take(range(10, len(ref)))
     assert list(tail.upper()) == [ascii_upper(s) for s in ref[10:]]
-    # sparse: a few strings far apart are packed instead
-    sparse = lines.take([0, len(ref) // 2, len(ref) - 2])
-    got = sparse.lower()
-    assert list(got) == [ascii_lower(ref[i]) for i in (0, len(ref) // 2, len(ref) - 2)]
-    assert got.buffer.nbytes == sparse.total(), "sparse lower should pack"
-
-    # out=: reused, and too small is an error
-    out = bytearray(len(data))
-    a = lines.lower(out=out)
-    assert a.buffer.obj is out and list(a) == [ascii_lower(s) for s in ref]
-    b = lines.upper(out=out)  # same buffer again: `a` now sees upper case
-    assert list(b) == [ascii_upper(s) for s in ref]
-    assert bytes(lines.join(b"|", out=bytearray(len(data) + 5))) == b"|".join(ref)
-    assert list(sparse.compact(out=bytearray(1000))) == list(sparse)
-    for bad, err in ((bytearray(3), ValueError), (b"x" * 10_000, TypeError)):
-        try:
-            lines.lower(out=bad)
-            raise AssertionError("bad out accepted")
-        except err:
-            pass
+    sparse = lines.take([0, len(ref) // 2, len(ref) - 2])  # packed
+    assert list(sparse.lower()) == \
+        [ascii_lower(ref[i]) for i in (0, len(ref) // 2, len(ref) - 2)]
 
     # in place: only the strings' own bytes change
     owned = bytearray(b"Abc,DEF,,gH")
@@ -203,12 +183,11 @@ def test_case_modes():
     assert kept.lower(inplace=True) is kept
     assert bytes(owned) == b"abc,DEF,,gh", bytes(owned)
     assert list(b) == [b"abc", b"DEF", b"", b"gh"], "other views see the change"
-    for immutable in (faf.Buffer.from_bytes(b"AB\nCD").split(),):
-        try:
-            immutable.lower(inplace=True)
-            raise AssertionError("inplace on bytes accepted")
-        except TypeError:
-            pass
+    try:
+        faf.Buffer.from_bytes(b"AB\nCD").split().lower(inplace=True)
+        raise AssertionError("inplace on bytes accepted")
+    except TypeError:
+        pass
     with tempfile.NamedTemporaryFile(delete=False) as f:
         f.write(b"AB\nCD\n")
     try:
@@ -224,61 +203,55 @@ def test_case_modes():
 
 
 def test_arena():
-    if not hasattr(faf.lib, "faf_ffi_arena_size"):
-        print("  (library built without arenas: arena test skipped)")
-        return
-    small = faf.Arena(pool_bytes=4096, npools=2)
-    faf.use_arena(small)
+    saved, faf._arena = faf._arena, faf.Arena(pool_bytes=4096, npools=4)
     try:
-        data = b"Hello\nWORLD\nAbc"
-        lines = faf.Buffer.from_bytes(data).split()
-        r = lines.lower()
+        lines = faf.Buffer.from_bytes(b"Hello\nWORLD\nAbc").split()  # region 1
+        r = lines.lower()                                             # region 2
         assert list(r) == [b"hello", b"world", b"abc"]
-        assert r.buffer.lease is not None, "result not from the arena"
-        addr = r.buffer.addr
+        addr = faf.lib.faf_batch_data(r.handle)
         del r  # gives the region back ...
         again = lines.upper()
-        assert again.buffer.addr == addr, "dropped region not reused"
-        other = lines.lower()  # ... while `again` is alive: another region
-        assert other.buffer.addr != addr and list(again) == [b"HELLO", b"WORLD", b"ABC"]
-        # every region in use: new bytearray
-        third = lines.lower()
-        assert third.buffer.lease is None and list(third) == list(other)
-        del again, other, third
-        # too big for a region: new bytearray
-        assert 4096 <= small.capacity < 4096 + 64, small.capacity
-        big = faf.Buffer.from_bytes(b"A" * small.capacity + b"\nb").split()
-        assert big.lower().buffer.lease is None
-        # derived views keep the region: it isn't reused while they live
+        assert faf.lib.faf_batch_data(again.handle) == addr, "dropped region not reused"
+        other, extra = lines.lower(), lines.lower()                  # regions 3, 4
+        assert list(again) == [b"HELLO", b"WORLD", b"ABC"]
+        try:  # every region in use
+            lines.lower()
+            raise AssertionError("a fifth batch fit in four regions")
+        except MemoryError:
+            pass
+        del again, other, extra
+        try:  # a result bigger than a region
+            faf.Buffer.from_bytes(b"A" * 5000).split().lower()
+            raise AssertionError("a 5000 byte result fit in 4096")
+        except MemoryError:
+            pass
+        # a filter keeps its parent (whose bytes it views) until it goes: a
+        # new batch must not get the parent's region and overwrite them
         r = lines.lower()
         kept = r.filter(array("B", [1, 0, 1]))
-        addr = r.buffer.addr
         del r
-        assert lines.lower().buffer.addr != addr, "region reused under live views"
-        assert list(kept) == [b"hello", b"abc"]
+        overwrite = lines.upper()
+        assert list(kept) == [b"hello", b"abc"], list(kept)
+        del kept, overwrite
         # to_arrow copies out of the arena
         try:
             import pyarrow  # noqa: F401
-            r = lines.lower()
-            arr = r.to_arrow()
-            del r, kept
+            arr = lines.lower().to_arrow()
             lines.upper(), lines.upper()  # reuse the regions
             assert arr.to_pylist() == [b"hello", b"world", b"abc"]
         except ImportError:
             pass
-        # results dropped on another thread give their region back
+        # a batch dropped on another thread gives its region back
         import threading
-        r = lines.lower()
-        addr = r.buffer.addr
-        holder = [r]
-        del r
+        holder = [lines.lower()]
+        addr = faf.lib.faf_batch_data(holder[0].handle)
         t = threading.Thread(target=holder.clear)
         t.start()
         t.join()
-        assert lines.lower().buffer.addr == addr
+        again = lines.lower()  # held: a temporary would be collected at once
+        assert faf.lib.faf_batch_data(again.handle) == addr
     finally:
-        faf.use_arena(None)
-    assert faf.Buffer.from_bytes(b"A").split().lower().buffer.lease is None
+        faf._arena = saved
 
 
 def test_arrow():
