@@ -5,7 +5,7 @@ CPython 3.12.10, pyarrow 19.0.1. Best of 5 (faf, pyarrow) or 3 (plain Python),
 every variant's results checked against the others. Plain Python works on
 `bytes`, with the same ASCII semantics as faf. Rerun the script at that commit
 for the full output. The lower case rows and the cold table are from
-`2297f37` (results share their input's views), the rest from `dc1a72e`.
+`254d411` (results share their input's views), the rest from `dc1a72e`.
 
 ## Summary
 

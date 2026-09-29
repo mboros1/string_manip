@@ -353,7 +353,7 @@ the shim carried layout and strategy logic every binding would repeat. So:
   Four lower case entry points became one plus in place. At first a
   result copied its views (16 bytes a string), which took Python's `lower` on
   8 B lines from 0.3 to 1.1 ns; now a result shares its input's views when
-  they start at 0, as pyarrow shares offsets (`2297f37`), and `lower` is even
+  they start at 0, as pyarrow shares offsets (`254d411`), and `lower` is even
   with pyarrow at every length again. The price is a lifetime rule: free
   the result before its input.
 - **The shim** keeps handles, garbage collection and interop only
