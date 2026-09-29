@@ -17,7 +17,8 @@
 //
 // Made for foreign function interfaces: handles are integers, everything else
 // is a pointer or an integer, nothing depends on build options, and nothing is
-// allocated except from the arena passed in (NULL: the default arena). Input
+// allocated except from the arena passed in (NULL: the default arena). A
+// pointer may be NULL where its length is 0. Input
 // bytes (and the offsets of faf_batch_from_offsets) are not copied: the
 // caller keeps them alive and unchanged while the batch is in use.
 //

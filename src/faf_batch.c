@@ -97,7 +97,8 @@ static inline faf_batch done(builder *bd, const char *data, const int64_t *start
 
 faf_batch faf_batch_split(faf_arena *arena, const char *data, size_t len,
                           char sep) {
-  size_t n = faf_k_count_byte(data, len, sep) + 1;
+  // (len 0: data may be NULL, so no kernel sees it)
+  size_t n = len ? faf_k_count_byte(data, len, sep) + 1 : 1;
   builder bd;
   if (n > SIZE_MAX / 16 || !start(&bd, arena, 2 * n * sizeof(int64_t)))
     return 0;
@@ -106,7 +107,7 @@ faf_batch faf_batch_split(faf_arena *arena, const char *data, size_t len,
 
   size_t pos[SPLIT_BATCH];
   size_t k = 0, from = 0;
-  for (;;) {
+  for (; len;) {
     size_t got = faf_k_find_bytes(data + from, len - from, sep, pos, SPLIT_BATCH);
     size_t base = from;
     for (size_t j = 0; j < got; ++j, ++k) {
