@@ -82,6 +82,22 @@ def agree(name, *results):
             raise AssertionError(f"{name}: variants disagree")
 
 
+# ---- regions for results ----
+
+_steps = []
+
+
+def step():
+    """A region for one timed call's results. The previous call's region is
+    released first, so repeated runs reuse memory as a loop over work
+    units would, and the last results stay readable for checking."""
+    while _steps:
+        _steps.pop().release()
+    r = faf.region()
+    _steps.append(r)
+    return r
+
+
 # ---- data ----
 
 LEVELS = [b"INFO", b"DEBUG", b"WARN"]
@@ -135,9 +151,9 @@ def faf_ops():
         "count ','": lambda b, nd: b.count(b","),
         "startswith": lambda b, nd: b.startswith(b"2026-09-29T12:0"),
         "lengths": lambda b, nd: b.lengths(),
-        "lower": lambda b, nd: b.lower(),
+        "lower": lambda b, nd: b.lower(into=step()),
         "hash": lambda b, nd: b.hash(),
-        "filter contains": lambda b, nd: b.filter(b.contains(nd)),
+        "filter contains": lambda b, nd: b.filter(b.contains(nd), into=step()),
     }
 
 
@@ -218,7 +234,8 @@ def section_ops(args):
 
 def run_ops(title, lines, needle, args, collect, length, ops=None):
     data = b"\n".join(lines)
-    batch = faf.Buffer.from_bytes(data).split(b"\n")
+    region = faf.region()  # held for the whole table
+    batch = region.split(data)
     arr = pa.array(lines, pa.large_string()) if pa else None
     n = len(lines)
     fo, po, ao = faf_ops(), py_ops(), pa_ops()
@@ -242,13 +259,16 @@ def run_ops(title, lines, needle, args, collect, length, ops=None):
         if collect is not None:
             collect.append((length, op, ns(tf), ns(tp), ns(ta) if ta else None))
     # splitting the input, for reference
-    ts, _ = best(lambda: faf.Buffer.from_bytes(data).split(b"\n"), args.runs)
+    ts, _ = best(lambda: step().split(data), args.runs)
     tps, _ = best(lambda: data.split(b"\n"), args.py_runs)
     tas, _ = best(lambda: pc.split_pattern(pa.array([data], pa.large_binary()), "\n"),
                   args.runs) if pa else (None, None)
     rows.append(["split into lines", fmt_ns(ts * 1e9 / n), fmt_ns(tps * 1e9 / n),
                  fmt_ns(tas * 1e9 / n) if tas else "n/a", ratio(tps, ts),
                  ratio(tas, ts) if tas else ""])
+    while _steps:
+        _steps.pop().release()
+    region.release()
     table(title + " -- ns per string",
           ["op", "faf", "python", "pyarrow", "python/faf", "pyarrow/faf"], rows)
 
@@ -299,7 +319,8 @@ def cold_lower_worker(impl, length, total):
     n = max(total // (length + 1), 10)
     lines = log_lines(n, length, 0.01, random.Random(5))
     if impl == "faf":
-        batch = faf.Buffer.from_bytes(b"\n".join(lines)).split(b"\n")
+        region = faf.region()
+        batch = region.split(b"\n".join(lines))
         fn = batch.lower
     else:
         if impl == "pyarrow":
@@ -331,11 +352,13 @@ def pipeline(impl, path, out_path):
     """Keep lines containing ERROR, lower-cased, written to out_path.
     Returns the number of lines written."""
     if impl == "faf":
-        lines = faf.Buffer.from_file(path).lines()
-        kept = lines.filter(lines.contains(NEEDLE)).lower()
-        with open(out_path, "wb") as f:
-            f.write(kept.join(b"\n"))
-        return len(kept)
+        data = faf.map_file(path)
+        with faf.region() as r:
+            lines = r.lines(data)
+            kept = lines.filter(lines.contains(NEEDLE)).lower()
+            with open(out_path, "wb") as f:
+                f.write(kept.join(b"\n"))
+            return len(kept)
     if impl == "python":
         with open(path, "rb") as f:
             lines = f.read().split(b"\n")
@@ -450,18 +473,33 @@ def section_crossover(args):
     rows = []
     for n in args.sizes:
         lines = log_lines(n, 80, 0.05, rng)
-        batch = faf.Buffer.from_bytes(b"\n".join(lines)).split(b"\n")
+        region = faf.region()
+        batch = region.split(b"\n".join(lines))
         runs = max(3, min(1000, 200_000 // n))
         row = [f"{n:,}"]
+        # one region per timed run holds that run's results, as one unit of
+        # work making many small results would
+        faf_calls = {
+            "contains": lambda r: batch.contains(NEEDLE),
+            "lower": lambda r: batch.lower(into=r),
+            "lengths": lambda r: batch.lengths(),
+        }
         for op in ("contains", "lower", "lengths"):
-            f, p = faf_ops()[op], py_ops()[op]
+            f, p = faf_calls[op], py_ops()[op]
             reps = max(1, 20_000 // n)
-            # results are dropped as they come, as a loop over batches would
-            tf, _ = best(lambda: [f(batch, NEEDLE) and None for _ in range(reps)], runs)
+
+            def run_faf():
+                r = step()
+                for _ in range(reps):
+                    f(r)
+            tf, _ = best(run_faf, runs)
             tp, _ = best(lambda: [p(lines, NEEDLE) and None for _ in range(reps)], runs)
             per = lambda t: t * 1e9 / (n * reps)  # noqa: E731
             row += [f"{fmt_ns(per(tf))} / {fmt_ns(per(tp))}", ratio(tp, tf)]
         rows.append(row)
+        while _steps:
+            _steps.pop().release()
+        region.release()
     table("ns per string, faf / plain Python, 80 B lines (python/faf > 1: faf wins)",
           ["strings", "contains", "", "lower", "", "lengths", ""], rows)
 
@@ -476,12 +514,16 @@ def section_ingest(args):
     for title, items in (("bytes, 80 B", log_lines(n, 80, 0.0, rng)),
                          ("str, 80 B", [s.decode() for s in log_lines(n, 80, 0.0, rng)]),
                          ("str, short keys", [s.decode() for s in short_keys(n, rng)])):
-        tf, bf = best(lambda: faf.Batch.from_list(items), args.runs)
+        tf, _ = best(lambda: step().from_list(items), args.runs)
         ta = None
         if pa:
             ta, _ = best(lambda: pa.array(items, pa.large_binary() if isinstance(
                 items[0], bytes) else pa.large_string()), args.runs)
-        tc, _ = best(lambda: bf.lower(), args.runs)  # for scale: one op
+        with faf.region() as hold:  # for scale: one op on the ingested batch
+            bf = hold.from_list(items)
+            tc, _ = best(lambda: bf.lower(into=step()), args.runs)
+            while _steps:
+                _steps.pop().release()
         rows.append([title, fmt_ns(tf * 1e9 / n), fmt_ns(ta * 1e9 / n) if ta else "n/a",
                      fmt_ns(tc * 1e9 / n)])
     table(f"ns per string, {n:,} strings from a Python list",

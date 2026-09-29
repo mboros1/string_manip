@@ -87,201 +87,160 @@ def check_batch(batch, ref, what):
     assert bytes(batch.join(b"")) == b"".join(ref), what
     assert batch.hash(seed=SEED).tolist() == [ref_hash(s, SEED) for s in ref], what
     assert batch.hash().tolist() == [ref_hash(s, 0) for s in ref], what
-    # selection keeps views of the same buffer
     mask = array("B", [rng.randrange(2) for _ in ref])
     kept = batch.filter(mask)
     assert list(kept) == [s for s, m in zip(ref, mask) if m], what
-    if ref:  # views of the same bytes, not a copy
-        assert faf.lib.faf_batch_data(kept.handle) == faf.lib.faf_batch_data(batch.handle)
     idx = [rng.randrange(len(ref)) for _ in range(len(ref) // 2)] if ref else []
     assert list(batch.take(idx)) == [ref[i] for i in idx], what
-    # chained: filter then transform
     assert list(kept.lower()) == [ascii_lower(s) for s, m in zip(ref, mask) if m]
 
 
 def test_sources():
-    for round_ in range(30):
+    for _ in range(30):
         data = random_data(rng.randrange(0, 60), rng.choice([4, 40, 300]))
         ref = data.split(b"\n")
-        ref_lines = data.splitlines() if b"\r" not in data else None
-        check_batch(faf.Buffer.from_bytes(data).split(b"\n"), ref, "bytes")
-        check_batch(faf.Buffer(bytearray(data)).split(b"\n"), ref, "bytearray")
+        with faf.region() as r:
+            check_batch(r.split(data), ref, "bytes")
+            check_batch(r.split(bytearray(data)), ref, "bytearray")
+            check_batch(r.from_list(ref), ref, "from_list bytes")
+            check_batch(r.from_list([s.decode("latin-1") for s in ref]),
+                        [s.decode("latin-1").encode() for s in ref], "from_list str")
         with tempfile.NamedTemporaryFile(delete=False) as f:
             f.write(data)
         try:
-            buf = faf.Buffer.from_file(f.name)
-            check_batch(buf.split(b"\n"), ref, "mmap")
-            lines = buf.lines()
-            want = ref[:-1] if data.endswith(b"\n") or not data else ref
-            check_batch(lines, want, "lines")
-            if ref_lines is not None:
-                assert list(lines) == ref_lines, "lines vs splitlines"
-            del buf, lines
+            mapped = faf.map_file(f.name)
+            with faf.region() as r:
+                check_batch(r.split(mapped), ref, "mmap")
+                check_batch(r.lines(mapped), data.splitlines(), "lines")
+            del mapped
         finally:
             os.unlink(f.name)
-        check_batch(faf.Batch.from_list(ref), ref, "from_list bytes")
-        check_batch(faf.Batch.from_list([s.decode("latin-1") for s in ref]),
-                    [s.decode("latin-1").encode() for s in ref], "from_list str")
 
 
 def test_split_separators():
-    data = b"a,b,,c,"
-    assert list(faf.Buffer.from_bytes(data).split(b",")) == data.split(b",")
-    assert list(faf.Buffer.from_bytes(b"").split(b",")) == [b""]
-    assert list(faf.Buffer.from_bytes(b"").lines()) == []
-    try:
-        faf.Buffer.from_bytes(data).split(b",,")
-        raise AssertionError("two-byte separator accepted")
-    except ValueError:
-        pass
+    with faf.region() as r:
+        assert list(r.split(b"a,b,,c,", b",")) == b"a,b,,c,".split(b",")
+        assert list(r.split(b"", b",")) == [b""]
+        assert list(r.lines(b"")) == []
+        try:
+            r.split(b"a,b", b",,")
+            raise AssertionError("two-byte separator accepted")
+        except ValueError:
+            pass
 
 
 def test_errors():
-    b = faf.Buffer.from_bytes(b"a\nb").split()
-    for bad in (2, -3):
+    with faf.region() as r:
+        b = r.split(b"a\nb")
+        for bad in (2, -3):
+            try:
+                b[bad]
+                raise AssertionError("index out of range accepted")
+            except IndexError:
+                pass
+        for call in (lambda: b.take([0, 2]), lambda: b.filter(array("B", [1]))):
+            try:
+                call()
+                raise AssertionError("bad argument accepted")
+            except (IndexError, ValueError):
+                pass
+    # a batch outlives its region only as a Python object: using it raises
+    for use in (lambda: list(b), lambda: b.lower(), lambda: b.contains(b"a")):
         try:
-            b[bad]
-            raise AssertionError("index out of range accepted")
-        except IndexError:
+            use()
+            raise AssertionError("batch used after its region was released")
+        except ValueError:
             pass
-    try:
-        b.take([0, 2])
-        raise AssertionError("take out of range accepted")
-    except IndexError:
-        pass
-    try:
-        b.filter(array("B", [1]))
-        raise AssertionError("short mask accepted")
-    except ValueError:
-        pass
 
 
 def test_big_split():
     # many pieces: across the library's 64-separators-per-scan batches
     lines = [bytes([97 + i % 26]) * (i % 7) for i in range(10000)]
-    data = b"\n".join(lines)
-    got = faf.Buffer.from_bytes(data).split()
-    assert len(got) == len(lines) and got.lengths().tolist() == [len(s) for s in lines]
-    assert list(got.take([0, 9999, 5000])) == [lines[0], lines[9999], lines[5000]]
+    with faf.region() as r:
+        got = r.split(b"\n".join(lines))
+        assert got.lengths().tolist() == [len(s) for s in lines]
+        assert list(got.take([0, 9999, 5000])) == [lines[0], lines[9999], lines[5000]]
 
 
 def test_case_modes():
     data = random_data(200, 60) + b"\n"
     ref = data.split(b"\n")
-    lines = faf.Buffer.from_bytes(data).split()
-    assert list(lines.lower()) == [ascii_lower(s) for s in ref]  # one pass
-    tail = lines.take(range(10, len(ref)))
-    assert list(tail.upper()) == [ascii_upper(s) for s in ref[10:]]
-    sparse = lines.take([0, len(ref) // 2, len(ref) - 2])  # packed
-    assert list(sparse.lower()) == \
-        [ascii_lower(ref[i]) for i in (0, len(ref) // 2, len(ref) - 2)]
-
-    # in place: only the strings' own bytes change
-    owned = bytearray(b"Abc,DEF,,gH")
-    b = faf.Buffer(owned).split(b",")
-    kept = b.take([0, 3])
-    assert kept.lower(inplace=True) is kept
-    assert bytes(owned) == b"abc,DEF,,gh", bytes(owned)
-    assert list(b) == [b"abc", b"DEF", b"", b"gh"], "other views see the change"
-    try:
-        faf.Buffer.from_bytes(b"AB\nCD").split().lower(inplace=True)
-        raise AssertionError("inplace on bytes accepted")
-    except TypeError:
-        pass
-    with tempfile.NamedTemporaryFile(delete=False) as f:
-        f.write(b"AB\nCD\n")
-    try:
-        mapped = faf.Buffer.from_file(f.name).lines()
+    with faf.region() as r:
+        lines = r.split(data)
+        assert list(lines.lower()) == [ascii_lower(s) for s in ref]  # one pass
+        tail = lines.take(range(10, len(ref)))
+        assert list(tail.upper()) == [ascii_upper(s) for s in ref[10:]]
+        sparse = lines.take([0, len(ref) // 2, len(ref) - 2])  # packed
+        assert list(sparse.lower()) == \
+            [ascii_lower(ref[i]) for i in (0, len(ref) // 2, len(ref) - 2)]
+        # in place: only the strings' own bytes change
+        owned = bytearray(b"Abc,DEF,,gH")
+        b = r.split(owned, b",")
+        kept = b.take([0, 3])
+        assert kept.lower(inplace=True) is kept
+        assert bytes(owned) == b"abc,DEF,,gh", bytes(owned)
+        assert list(b) == [b"abc", b"DEF", b"", b"gh"], "other views see the change"
         try:
-            mapped.lower(inplace=True)
-            raise AssertionError("inplace on a mapped file accepted")
+            r.split(b"AB\nCD").lower(inplace=True)
+            raise AssertionError("inplace on bytes accepted")
         except TypeError:
             pass
-        del mapped
-    finally:
-        os.unlink(f.name)
 
 
-def test_arena():
-    saved, faf._arenas = faf._arenas, (faf.Arena(pool_bytes=4096, npools=4),)
-    try:
-        lines = faf.Buffer.from_bytes(b"Hello\nWORLD\nAbc").split()  # region 1
-        r = lines.lower()                                             # region 2
-        assert list(r) == [b"hello", b"world", b"abc"]
-        addr = faf.lib.faf_batch_data(r.handle)
-        del r  # gives the region back ...
-        again = lines.upper()
-        assert faf.lib.faf_batch_data(again.handle) == addr, "dropped region not reused"
-        other, extra = lines.lower(), lines.lower()                  # regions 3, 4
-        assert list(again) == [b"HELLO", b"WORLD", b"ABC"]
-        try:  # every region in use
-            lines.lower()
-            raise AssertionError("a fifth batch fit in four regions")
-        except MemoryError:
-            pass
-        del again, other, extra
-        try:  # a result bigger than a region
-            faf.Buffer.from_bytes(b"A" * 5000).split().lower()
-            raise AssertionError("a 5000 byte result fit in 4096")
-        except MemoryError:
-            pass
-        # a filter keeps its parent (whose bytes it views) until it goes: a
-        # new batch must not get the parent's region and overwrite them
-        r = lines.lower()
-        kept = r.filter(array("B", [1, 0, 1]))
-        del r
-        overwrite = lines.upper()
-        assert list(kept) == [b"hello", b"abc"], list(kept)
-        del kept, overwrite
-        # a lower-cased result shares its input's views: dropping the input
-        # (whose region a new split may take) must not change the result
-        src = faf.Buffer.from_bytes(b"Hello\nWORLD\nAbc").split()
-        low = src.lower()
-        del src
-        other = faf.Buffer.from_bytes(b"x\ny\nzzzzzzzzzzzzzzzz").split()
-        assert list(low) == [b"hello", b"world", b"abc"], list(low)
-        del low, other
-        # to_arrow copies out of the arena
+def test_regions():
+    # everything made in a region lives until it is released, then its
+    # memory is the next region's
+    with faf.region() as r:
+        low = r.split(b"Hello\nWORLD").lower()
+        first = faf.lib.faf_batch_data(low.ptr)
+        assert list(low) == [b"hello", b"world"]
+    with faf.region() as r:
+        again = r.split(b"Hello\nWORLD").upper()
+        assert faf.lib.faf_batch_data(again.ptr) == first, "released region not reused"
+        with faf.region() as inner:  # a second region at the same time
+            other = inner.split(b"x\ny").upper()
+            assert faf.lib.faf_batch_data(other.ptr) != first
+            assert list(again) == [b"HELLO", b"WORLD"]
+    # results can go into another region, released on its own
+    with faf.region() as r:
+        lines = r.split(b"Ab\ncD")
+        with faf.region() as step:
+            low = lines.lower(into=step)
+            assert list(low) == [b"ab", b"cd"]
+        assert list(lines) == [b"Ab", b"cD"]
         try:
-            import pyarrow  # noqa: F401
-            arr = lines.lower().to_arrow()
-            lines.upper(), lines.upper()  # reuse the regions
-            assert arr.to_pylist() == [b"hello", b"world", b"abc"]
-        except ImportError:
+            list(low)
+            raise AssertionError("result used after its region")
+        except ValueError:
             pass
-        # a batch dropped on another thread gives its region back
-        import threading
-        holder = [lines.lower()]
-        addr = faf.lib.faf_batch_data(holder[0].handle)
-        t = threading.Thread(target=holder.clear)
-        t.start()
-        t.join()
-        again = lines.lower()  # held: a temporary would be collected at once
-        assert faf.lib.faf_batch_data(again.handle) == addr
-    finally:
-        faf._arenas = saved
-
-
-def test_two_arenas():
-    # small results in the first arena, a big one in the second
-    small, big = faf.Arena(4096, 3), faf.Arena(64 << 10, 1)
-    saved, faf._arenas = faf._arenas, (small, big)
+    # a full region raises
+    small = faf._Arena(pool_bytes=16 << 20, npools=1)
+    r = faf.Region(small)
     try:
-        lines = faf.Buffer.from_bytes(b"a\nb").split()
-        wide = faf.Buffer.from_bytes(b"x" * 20000).split()
-        in_small = lambda b: faf.lib.faf_batch_data(b.handle) - faf._address(small._mem)
-        low = lines.upper()
-        assert 0 <= in_small(low) < len(small._mem), "small result not in the small arena"
-        w = wide.upper()   # 20000 bytes: only the big arena holds it
-        assert list(w) == [b"X" * 20000]
-        assert not 0 <= in_small(w) < len(small._mem)
-        try:  # small arena full (lines, wide, low), big one's region taken
-            wide.lower()
-            raise AssertionError("a second big result fit")
-        except MemoryError:
-            pass
+        r.split(b"x" * (32 << 20)).lower()
+        raise AssertionError("a result bigger than the region fit")
+    except MemoryError:
+        pass
     finally:
-        faf._arenas = saved
+        r.release()
+    # regions on several threads at once
+    import threading
+    errors = []
+
+    def work(k):
+        try:
+            for _ in range(50):
+                with faf.region() as r:
+                    b = r.split(b"A%d\nb%d" % (k, k)).lower()
+                    assert list(b) == [b"a%d" % k, b"b%d" % k]
+        except Exception as e:  # noqa: BLE001
+            errors.append(e)
+    threads = [threading.Thread(target=work, args=(k,)) for k in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert not errors, errors
 
 
 def test_arrow():
@@ -291,22 +250,20 @@ def test_arrow():
         print("  (pyarrow not installed: arrow tests skipped)")
         return
     ref = [b"x", b"", b"hello", b"\xc3\xa9t\xc3\xa9"]
-    for arr in (pa.array(ref, pa.binary()), pa.array(ref, pa.large_binary()),
-                pa.array([s.decode() for s in ref]), pa.array(ref)[1:]):
-        want = [bytes(v.as_py() if isinstance(v.as_py(), bytes) else v.as_py().encode())
-                for v in arr]
-        check_batch(faf.Batch.from_arrow(arr), want, str(arr.type))
-    b = faf.Buffer.from_bytes(b"one\ntwo\nthree").split()
-    kept = b.filter(array("B", [1, 0, 1]))
-    assert kept.to_arrow().to_pylist() == [b"one", b"three"]
-    compact = b.compact()
-    assert compact.to_arrow().to_pylist() == [b"one", b"two", b"three"]
-    assert faf.Batch.from_arrow(compact.to_arrow()).head() == [b"one", b"two", b"three"]
-    try:
-        faf.Batch.from_arrow(pa.array([b"a", None]))
-        raise AssertionError("nulls accepted")
-    except ValueError:
-        pass
+    with faf.region() as r:
+        for arr in (pa.array(ref, pa.binary()), pa.array(ref, pa.large_binary()),
+                    pa.array([s.decode() for s in ref]), pa.array(ref)[1:]):
+            want = [v.as_py() if isinstance(v.as_py(), bytes) else v.as_py().encode()
+                    for v in arr]
+            check_batch(r.from_arrow(arr), want, str(arr.type))
+        kept = r.split(b"one\ntwo\nthree").filter(array("B", [1, 0, 1]))
+        out = kept.lower().to_arrow()
+        try:
+            r.from_arrow(pa.array([b"a", None]))
+            raise AssertionError("nulls accepted")
+        except ValueError:
+            pass
+    assert out.to_pylist() == [b"one", b"three"], "arrow copy outlives the region"
 
 
 def test_numpy():
@@ -315,10 +272,11 @@ def test_numpy():
     except ImportError:
         print("  (numpy not installed: numpy test skipped)")
         return
-    b = faf.Buffer.from_bytes(b"aa\nb\n").split()
-    assert faf.to_numpy(b.lengths()).tolist() == [2, 1, 0]
-    assert faf.to_numpy(b.contains(b"a")).dtype == np.uint8
-    assert faf.to_numpy(b.hash()).dtype == np.uint64
+    with faf.region() as r:
+        b = r.split(b"aa\nb\n")
+        assert faf.to_numpy(b.lengths()).tolist() == [2, 1, 0]
+        assert faf.to_numpy(b.contains(b"a")).dtype == np.uint8
+        assert faf.to_numpy(b.hash()).dtype == np.uint64
 
 
 if __name__ == "__main__":
