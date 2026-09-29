@@ -233,6 +233,14 @@ def test_arena():
         overwrite = lines.upper()
         assert list(kept) == [b"hello", b"abc"], list(kept)
         del kept, overwrite
+        # a lower-cased result shares its input's views: dropping the input
+        # (whose region a new split may take) must not change the result
+        src = faf.Buffer.from_bytes(b"Hello\nWORLD\nAbc").split()
+        low = src.lower()
+        del src
+        other = faf.Buffer.from_bytes(b"x\ny\nzzzzzzzzzzzzzzzz").split()
+        assert list(low) == [b"hello", b"world", b"abc"], list(low)
+        del low, other
         # to_arrow copies out of the arena
         try:
             import pyarrow  # noqa: F401

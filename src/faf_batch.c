@@ -297,12 +297,20 @@ faf_batch faf_batch_compact(faf_arena *arena, faf_batch b) {
   return h ? packed(arena, h, faf_batch_total(b), true, false) : 0;
 }
 
-// One pass over data[lo, lo + span), and the same views shifted by -lo.
+// One pass over data[lo, lo + span), and the same views shifted by -lo. When
+// lo is 0 they need no shift, and the result shares the input's views instead
+// of copying them (16 bytes a string, more than short strings themselves).
 static faf_batch one_pass(faf_arena *arena, const header *h, int64_t lo,
                           int64_t span, bool upper) {
+  size_t views = lo ? 2 * h->n * sizeof(int64_t) : 0;
   builder bd;
-  if (!start(&bd, arena, 2 * h->n * sizeof(int64_t) + (size_t)span))
+  if (!start(&bd, arena, views + (size_t)span))
     return 0;
+  if (lo == 0) {
+    char *dst = carve(&bd, (size_t)span);
+    faf_k_ascii_case(dst, h->data, (size_t)span, upper);
+    return done(&bd, dst, h->starts, h->ends, h->n, h->flags);
+  }
   int64_t *starts = carve(&bd, h->n * sizeof(int64_t));
   int64_t *ends = carve(&bd, h->n * sizeof(int64_t));
   char *dst = carve(&bd, (size_t)span);

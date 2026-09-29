@@ -274,11 +274,20 @@ static void test_case_paths(void) {
   faf_batch s = faf_batch_split(A, text, len, ',');
   size_t n = ref_split(text, len, ',', starts, ends);
   check_case(s, text, starts, ends, n, "split");
+  // views from 0: the result shares them; from elsewhere: its own
+  faf_batch r = faf_batch_ascii_case(A, s, 0);
+  ASSERT_TRUE(faf_batch_starts(r) == faf_batch_starts(s) &&
+                  faf_batch_ends(r) == faf_batch_ends(s),
+              "views from 0 were copied");
+  faf_batch_free(r);
   // dense Arrow offsets that don't start at 0
   int64_t offs[4] = {4, 7, 7, 12};
   faf_batch o = faf_batch_from_offsets(A, text, offs, 3);
   int64_t os[3] = {4, 7, 7}, oe[3] = {7, 7, 12};
   check_case(o, text, os, oe, 3, "offsets from 4");
+  r = faf_batch_ascii_case(A, o, 0);
+  ASSERT_TRUE(faf_batch_starts(r) != faf_batch_starts(o), "shifted views shared");
+  faf_batch_free(r);
   // scattered but covering most of the range, and sparse
   n = make_views();
   faf_batch v = faf_batch_from_views(A, words, starts, ends, n);

@@ -104,7 +104,9 @@ faf_batch faf_batch_take(faf_arena *arena, faf_batch b, const int64_t *idx,
 // ASCII lower case (upper != 0: upper case) copies of the strings, in the new
 // region. Other bytes are unchanged. Views in order over most of their range
 // (a split, Arrow offsets) are converted in one pass over that range;
-// scattered ones string by string.
+// scattered ones string by string. When the views start at 0 (a split, Arrow
+// offsets from 0), the result shares them with `b` rather than copying them:
+// free the result first, and don't free `b` while the result is in use.
 faf_batch faf_batch_ascii_case(faf_arena *arena, faf_batch b, int upper);
 
 // The strings end to end in the new region (Arrow layout).

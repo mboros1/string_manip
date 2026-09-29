@@ -328,8 +328,8 @@ class Batch:
         return self._out("Q", lib.faf_batch_hash, seed)
 
     # -- new batches --
-    # select/take view the same bytes, so the result keeps this batch alive;
-    # lower/upper/compact own their bytes.
+    # select/take view the same bytes and lower/upper may share its views, so
+    # those results keep this batch alive; compact owns everything.
 
     def _new(self, fn, *args, keep=None):
         return Batch(*_make(fn, self.handle, *args), keep=keep)
@@ -365,7 +365,8 @@ class Batch:
                 raise TypeError("inplace needs a batch over a bytearray")
             lib.faf_batch_ascii_case_inplace(self.handle, upper)
             return self
-        return self._new(lib.faf_batch_ascii_case, upper)
+        # the result may share this batch's views: it keeps this batch alive
+        return self._new(lib.faf_batch_ascii_case, upper, keep=self)
 
     def _owner(self):
         # the Python object this batch's bytes are in, if any
