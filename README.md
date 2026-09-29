@@ -1,39 +1,30 @@
 # FaF Strings
 
-*Fast as F\*\*\* strings.* A C string library that is a personal playground
-for two questions:
+*Fast as F\*\*\* strings.* A native library demonstrating how much can be gained
+by tuning basic building blocks like memory allocation and kernel operations, applied
+to one of the most basic data structures in computer science, strings.
 
-1. **How far can one small set of byte kernels be pushed on very different
-   CPUs?** An Apple M1, x86, and two microcontrollers (ESP32, ESP32-S3), each
-   with the backend that suits it: SSE2, NEON, word-at-a-time C (SWAR), and
-   hand-written Xtensa assembly on the S3's vector unit.
-2. **What does pooled memory buy over malloc?** All memory comes from static
-   pools, handed out as regions that are freed all at once.
+Currently has optimized builds for Apple Silicon and ESP32 architectures, including
+both the simpler RISC-V architecture and more advanced features available in the
+XTensa architecture that have SIMD-like behavior.
 
-Strings are the workload because they touch everything: scanning, comparing,
-copying, allocating, formatting.
+## Basic Design
 
-It is usable, and tested on all of the above, but still evolving: APIs can
-change.
-
-## What it is
-
-- **`faf_string`**: a start/end pointer pair, passed by value. Views and owned
-  strings are the same type; owned ones live in a region.
-- **Regions over static pools**: no malloc, no free per string, generation
-  checked handles, and a result of `FAF_STRING_NONE` when a region is full.
-  Pool count, size and placement are build options, down to a few hundred
-  bytes for a microcontroller.
-- **Rings**: for data that is safe to lose (recent log lines, caches), a ring
-  of strings over a buffer you provide, where handles detect overwritten
-  strings with one compare.
-- **Byte kernels**: everything architecture-specific is 12 small kernels
-  (find, count, strlen, compare, case...). The rest is portable C on top.
-- **Freestanding**: no libc beyond `memcpy`/`memset`, which every C compiler
-  requires anyway (`make check_freestanding` enforces it).
-- **Every backend is checked against a plain byte-at-a-time version**, at every
-  length and alignment, on every machine, including the boards.
-
+- **`faf_string`**: a start/end pointer pair, passed by value, which can represent
+  both a view and an owned string.
+- **Regions over static pools**: Keeps memory bounded, avoids costly mallocs/frees,
+  and memory is managed as a regional object that is easier to reason about and has
+  clean failure messages when memory is exhausted.
+- **Rings**: A variant for data that is safe to lose in high throughput systems
+  like logs or caches, that safely detects overwritten data with hard memory exhaustion
+  failures.
+- **Byte kernels**: Give system specific optimizations over byte operations, that can
+  be easily wrapped by portable code at a higher level.
+- **Freestanding**: Can be used on any system, from the smallest microcontrollers to
+  operating systems with advanced hardware acceleration. Only requirement is a C compiler.
+- **Benchmarking as first class**: Detailed benchmarking analysis is done on all kernels,
+  to log performance progress as the library evolves and more systems are added.
+  
 ## Some results
 
 From [bench/RESULTS.md](bench/RESULTS.md) (recorded, reproducible runs):
