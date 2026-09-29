@@ -8,7 +8,7 @@ Include `faf.h` for everything, or the individual headers:
 | Header | What's in it |
 |---|---|
 | `faf_string.h` | `faf_string` (a start/end pointer pair, passed by value), `faf_string_init` |
-| `faf_string_mem.h` | Region allocator: `faf_region_acquire` / `faf_reserve` / `faf_region_release`, `faf_string_copy`, `faf_memcpy` / `faf_memset` |
+| `faf_string_mem.h` | Region allocator: `faf_region_acquire` / `faf_reserve` / `faf_region_release`, arenas over caller memory (`faf_arena_init` / `faf_arena_acquire`), `faf_string_copy`, `faf_memcpy` / `faf_memset` |
 | `faf_string_search.h` | `eq`, `starts_with`, `ends_with`, `find` / `rfind` (substring or char), `contains`, `count`, `find_any` |
 | `faf_string_view.h` | `slice`, `trim` / `ltrim` / `rtrim`, `next_token` (split iterator), `split_once` |
 | `faf_string_strsplit.h` | `split` (array of views), `split_owned` (copies, NUL terminated tokens) |

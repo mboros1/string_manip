@@ -1,4 +1,5 @@
 #include "faf_string.h"
+#include "faf_string_case.h"
 #include "faf_string_mem.h"
 #include "faf_test.h"
 
@@ -215,6 +216,148 @@ static void test_copy_out_of_space(void) {
   faf_region_release(r);
 }
 
+/* ---- Arenas over caller memory ---- */
+
+// Room for small arenas, with a canary past the end to catch overruns.
+#define ARENA_BUF 4096
+#define CANARY 64
+static _Alignas(64) unsigned char arena_buf[ARENA_BUF + CANARY];
+static _Alignas(64) unsigned char arena_buf2[ARENA_BUF];
+
+static void fill_canary(size_t nbytes) {
+  memset(arena_buf + nbytes, 0xA5, CANARY);
+}
+
+static bool canary_intact(size_t nbytes) {
+  for (size_t i = 0; i < CANARY; ++i)
+    if (arena_buf[nbytes + i] != 0xA5)
+      return false;
+  return true;
+}
+
+static void test_arena_init(void) {
+  // faf_arena_bytes is enough at every alignment of the buffer
+  const size_t npools = 3, slots = 20;
+  size_t need = faf_arena_bytes(npools, slots);
+  ASSERT_TRUE(need > 0 && need + 64 <= ARENA_BUF, "unexpected arena size");
+  for (size_t shift = 0; shift < 64; ++shift) {
+    faf_arena a;
+    ASSERT_TRUE(faf_arena_init(&a, arena_buf + shift, need, npools),
+                "init failed with faf_arena_bytes of memory");
+    faf_region r = faf_arena_acquire(&a);
+    ASSERT_TRUE(faf_region_valid(r), "no region from a new arena");
+    ASSERT_TRUE(faf_region_capacity(r) >= slots, "pools smaller than asked");
+    faf_span sp = faf_reserve(r, 1);
+    ASSERT_TRUE((uintptr_t)sp.ptr % FAF_SLOT_BYTES == 0,
+                "arena slots not aligned to FAF_SLOT_BYTES");
+    faf_region_release(r);
+  }
+}
+
+static void test_arena_init_rejects(void) {
+  faf_arena a;
+  ASSERT_TRUE(!faf_arena_init(&a, NULL, ARENA_BUF, 2), "NULL buffer accepted");
+  ASSERT_TRUE(!faf_arena_init(&a, arena_buf, ARENA_BUF, 0), "0 pools accepted");
+  ASSERT_TRUE(!faf_arena_init(&a, arena_buf, ARENA_BUF, UINT16_MAX),
+              "UINT16_MAX pools accepted");
+  ASSERT_TRUE(!faf_arena_init(&a, arena_buf, 8, 2), "8 bytes accepted");
+  // the smallest buffer that works gives each pool exactly one slot, and one
+  // byte less is rejected
+  size_t min = 1;
+  while (min <= ARENA_BUF && !faf_arena_init(&a, arena_buf, min, 4))
+    ++min;
+  ASSERT_TRUE(min <= faf_arena_bytes(4, 1), "faf_arena_bytes(4, 1) too small");
+  ASSERT_INT_EQ(1, (int)faf_region_capacity(faf_arena_acquire(&a)),
+                "smallest arena has more than a slot per pool");
+  ASSERT_TRUE(!faf_arena_init(&a, arena_buf, min - 1, 4),
+              "too small for a slot per pool accepted");
+  ASSERT_TRUE(faf_region_valid(faf_arena_acquire(&a)) == false,
+              "failed arena handed out a region");
+  ASSERT_INT_EQ(0, (int)faf_arena_bytes(0, 10), "0 pools has a size");
+  ASSERT_INT_EQ(0, (int)faf_arena_bytes(2, SIZE_MAX / 2), "overflow has a size");
+}
+
+static void test_arena_regions(void) {
+  faf_arena a;
+  ASSERT_TRUE(faf_arena_init(&a, arena_buf, ARENA_BUF, 4), "init failed");
+
+  faf_region all[4];
+  for (int i = 0; i < 4; ++i) {
+    all[i] = faf_arena_acquire(&a);
+    ASSERT_TRUE(faf_region_valid(all[i]), "arena pool not handed out");
+    for (int j = 0; j < i; ++j)
+      ASSERT_TRUE(all[i].pool != all[j].pool, "two live regions share a pool");
+  }
+  ASSERT_TRUE(!faf_region_valid(faf_arena_acquire(&a)),
+              "acquire past the arena's pools succeeded");
+
+  // strings allocated from arena regions live in the arena's memory
+  faf_string lower = faf_string_to_lower(all[2], faf_string_init("HeLLo"));
+  ASSERT_STR_EQ("hello", lower.start, "wrong result in arena region");
+  ASSERT_TRUE(faf_arena_contains(&a, lower.start, 6), "result not in arena");
+  ASSERT_TRUE(!faf_mem_contains(lower.start, 1), "result in default arena");
+
+  faf_region_release(all[2]);
+  ASSERT_TRUE(!faf_region_valid(all[2]), "released handle still valid");
+  faf_region again = faf_arena_acquire(&a);
+  ASSERT_TRUE(again.pool == all[2].pool, "freed pool not reused");
+  ASSERT_TRUE(!faf_region_valid(all[2]), "old handle valid after reuse");
+
+  faf_region_release(again);
+  for (int i = 0; i < 4; ++i)
+    faf_region_release(all[i]);
+}
+
+static void test_arena_independent(void) {
+  faf_arena a, b;
+  ASSERT_TRUE(faf_arena_init(&a, arena_buf, ARENA_BUF, 1), "init a failed");
+  ASSERT_TRUE(faf_arena_init(&b, arena_buf2, ARENA_BUF, 1), "init b failed");
+
+  faf_region ra = faf_arena_acquire(&a);
+  // a exhausted: b and the default arena are unaffected
+  ASSERT_TRUE(!faf_region_valid(faf_arena_acquire(&a)), "a has a second pool");
+  faf_region rb = faf_arena_acquire(&b);
+  faf_region rd = faf_region_acquire();
+  ASSERT_TRUE(faf_region_valid(rb) && faf_region_valid(rd),
+              "one arena's use blocked another");
+
+  // same pool index and generation, different arena: not interchangeable
+  faf_region forged = {.arena = &b, .pool = ra.pool, .gen = ra.gen};
+  faf_region_release(ra);
+  ASSERT_TRUE(faf_region_valid(rb), "releasing in a invalidated b");
+  ASSERT_TRUE(faf_region_valid(forged), "b's pool should still be live");
+  faf_string s = faf_string_copy(rb, faf_string_init("in b"));
+  ASSERT_TRUE(faf_arena_contains(&b, s.start, 5) &&
+                  !faf_arena_contains(&a, s.start, 1),
+              "copy landed in the wrong arena");
+
+  faf_region_release(rb);
+  faf_region_release(rd);
+}
+
+static void test_arena_bounds(void) {
+  // fill every pool to capacity; nothing may be written past nbytes
+  const size_t nbytes = 1000; // deliberately not a multiple of anything
+  fill_canary(nbytes);
+  faf_arena a;
+  ASSERT_TRUE(faf_arena_init(&a, arena_buf, nbytes, 3), "init failed");
+  faf_region r[3];
+  for (int i = 0; i < 3; ++i) {
+    r[i] = faf_arena_acquire(&a);
+    size_t cap = faf_region_capacity(r[i]);
+    ASSERT_TRUE(cap > 0, "pool has no slots");
+    ASSERT_TRUE(faf_reserve(r[i], cap + 1).ptr == NULL, "reserved past a pool");
+    faf_span sp = faf_reserve(r[i], cap);
+    ASSERT_TRUE(sp.ptr != NULL, "couldn't reserve a whole pool");
+    ASSERT_TRUE(!faf_reserve_extend(r[i], &sp, 1), "extended past a pool");
+    memset(sp.ptr, 'X', cap * FAF_SLOT_BYTES);
+    ASSERT_INT_EQ(0, (int)faf_region_remaining(r[i]), "full pool has room");
+  }
+  ASSERT_TRUE(canary_intact(nbytes), "arena wrote past its buffer");
+  for (int i = 0; i < 3; ++i)
+    faf_region_release(r[i]);
+}
+
 // Test case definitions
 static test_case_t string_mem_tests[] = {
     {"acquire", test_acquire},
@@ -228,6 +371,11 @@ static test_case_t string_mem_tests[] = {
     {"copy_nul_terminated", test_copy_nul_terminated},
     {"copy_from_region", test_copy_from_region},
     {"copy_out_of_space", test_copy_out_of_space},
+    {"arena_init", test_arena_init},
+    {"arena_init_rejects", test_arena_init_rejects},
+    {"arena_regions", test_arena_regions},
+    {"arena_independent", test_arena_independent},
+    {"arena_bounds", test_arena_bounds},
 };
 
 // Setup and teardown functions

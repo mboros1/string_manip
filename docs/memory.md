@@ -1,29 +1,59 @@
 # Memory
 
-All memory is static: `FAF_NPOOLS` pools of `FAF_POOL_SLOTS` slots of
-`FAF_SLOT_BYTES`, 12 × 1024 slots by default. There is no malloc.
+There is no malloc. Regions come from an **arena**: a fixed set of pools of
+slots over one block of memory. The default arena is static storage, sized at
+build time; others can be laid over any memory you provide, sized at run time.
 
-- **Regions.** A region is one pool. `faf_region_acquire` takes a free pool,
-  allocations bump through it, and `faf_region_release` frees everything in it
-  at once. Handles carry a generation number, so a released region can't be
+- **Regions.** A region is one pool. `faf_region_acquire` takes a free pool of
+  the default arena (`faf_arena_acquire(&a)` of another one), allocations bump
+  through it, and `faf_region_release` frees everything in it at once. Handles
+  carry their arena and a generation number, so a released region can't be
   used by mistake. Functions that allocate return `FAF_STRING_NONE` when the
   region is out of space.
-- **Size limits.** `FAF_POOL_SLOTS` × `FAF_SLOT_BYTES` caps the size of any
-  single result.
+- **Size limits.** A pool's size caps the size of any single result:
+  `FAF_POOL_SLOTS` × `FAF_SLOT_BYTES` in the default arena,
+  `faf_region_capacity(r)` slots in general.
 - **Slot size** is the allocation granularity and alignment. It defaults to the
   backend's register width: 16 with SSE2, NEON and PIE, the word size (4 or 8)
   with SWAR, 8 with `ref`. Smaller slots waste less on short strings; any power
-  of two at least the alignment of `faf_string` works.
-- **Placement.** `FAF_POOL_ATTR` places the pool storage, e.g.
+  of two at least the alignment of `faf_string` works. It is a build option
+  for every arena.
+- **Placement.** `FAF_POOL_ATTR` places the default arena's storage, e.g.
   `-DFAF_POOL_ATTR=EXT_RAM_BSS_ATTR` for PSRAM on an ESP32.
 
-All four are build options, e.g. `-DFAF_NPOOLS=4 -DFAF_POOL_SLOTS=512` for
-32 KB on a microcontroller.
+The default arena's sizes are build options, e.g. `-DFAF_NPOOLS=4
+-DFAF_POOL_SLOTS=512` for 32 KB on a microcontroller.
 
 Tests adapt to the configured sizes: a test that needs more room than the build
 has, or guard pages (`mmap`) that a microcontroller lacks, declares it with
 `TEST_REQUIRE(condition, reason)` and is reported as SKIPPED. `make check_small`
 runs the suite with 2 × 1 KB pools.
+
+## Arenas over your memory
+
+```c
+static char buf[1 << 20];
+faf_arena a;
+faf_arena_init(&a, buf, sizeof buf, 8);   // 8 pools, ~128 KB each
+faf_region r = faf_arena_acquire(&a);
+faf_string s = faf_string_to_lower(r, line);
+...
+faf_region_release(r);
+```
+
+`faf_arena_init` puts a few bytes of bookkeeping at the start of the buffer
+and splits the rest evenly into pools, aligned to the slot size;
+`faf_arena_bytes(npools, pool_slots)` says how much memory a given shape needs.
+The memory can come from anywhere: a static array, the stack, `malloc`,
+`mmap`, or a buffer owned by another language's runtime.
+
+Nothing is shared between arenas, so the rule for threads is simple: an arena
+and its regions belong to one thread at a time, and threads that each have
+their own arena never contend. The default arena is one arena like any other,
+so it belongs to one thread too.
+
+Re-initializing an arena resets its generations, so handles from before it
+are not detected as stale: release them first.
 
 ## Rings
 
