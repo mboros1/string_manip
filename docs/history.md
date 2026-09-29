@@ -350,7 +350,10 @@ the shim carried layout and strategy logic every binding would repeat. So:
 - **Batches are handles** (`616d07a`): a batch lives in a region (a header,
   its views, the bytes of results), C knows whether its views are in order
   and picks the lower case strategy, and one `faf_batch_free` releases it.
-  Four lower case entry points became one plus in place.
+  Four lower case entry points became one plus in place. The cost: a result
+  copies its views (16 bytes a string) instead of reusing the input's, so
+  Python's `lower` on 8 B lines went from 0.3 to 1.1 ns (pyarrow: 0.3); from
+  128 B up it is still even with pyarrow.
 - **The shim** keeps handles, garbage collection and interop only
   (`6f00703`): ~400 lines, down from 505. Each live batch holds a region, so
   one arena of 64 regions ran out as soon as a loop kept 64 results; batches
