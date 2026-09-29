@@ -405,6 +405,37 @@ static void test_high_bytes(void) {
   faf_batch_free(l), faf_batch_free(b);
 }
 
+static void test_null_where_empty(void) {
+  // the header promises NULL is fine wherever the length is 0
+  faf_batch e = faf_batch_split(A, NULL, 0, ',');
+  ASSERT_INT_EQ(1, (int)faf_batch_len(e), "empty split is one empty string");
+  faf_batch z = faf_batch_from_offsets(A, NULL, out64, 0); // out64[0]: any
+  const char *s = "abc";
+  faf_batch b = faf_batch_split(A, s, 3, ',');
+  faf_batch all[] = {e, z, b};
+  for (size_t k = 0; k < 3; ++k) {
+    faf_batch x = all[k];
+    faf_batch_find(x, NULL, 0, out64);
+    faf_batch_count(x, NULL, 0, out64);
+    faf_batch_contains(x, NULL, 0, out8);
+    faf_batch_starts_with(x, NULL, 0, out8);
+    faf_batch_ends_with(x, NULL, 0, out8);
+    faf_batch_eq(x, NULL, 0, out8);
+    faf_batch_eq_icase(x, NULL, 0, out8);
+    faf_batch r = faf_batch_ascii_case(A, x, 0);
+    faf_batch c = faf_batch_compact(A, x);
+    ASSERT_TRUE(r && c, "result of an empty or NULL batch");
+    faf_batch_free(r), faf_batch_free(c);
+    faf_batch_join(x, NULL, 0, dst);
+  }
+  faf_batch_join(z, ",", 1, NULL); // nothing to write
+  faf_batch t = faf_batch_take(A, b, NULL, 0);
+  faf_batch sel = faf_batch_select(A, z, NULL);
+  ASSERT_TRUE(t && sel && faf_batch_len(t) == 0 && faf_batch_len(sel) == 0, "empty take / select");
+  faf_batch_free(t), faf_batch_free(sel);
+  faf_batch_free(e), faf_batch_free(z), faf_batch_free(b);
+}
+
 static test_case_t batch_tests[] = {
     {"split_cases", test_split_cases},
     {"split_random", test_split_random},
@@ -418,6 +449,7 @@ static test_case_t batch_tests[] = {
     {"stale_and_foreign", test_stale_and_foreign},
     {"too_big", test_too_big},
     {"high_bytes", test_high_bytes},
+    {"null_where_empty", test_null_where_empty},
 };
 
 static void batch_setup(void) {

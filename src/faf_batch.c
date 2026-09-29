@@ -43,6 +43,11 @@ static inline header *hdr(faf_batch b) {
              : NULL;
 }
 
+// Where a caller passes NULL for something of length 0: even NULL + 0 is
+// undefined in C, so an empty buffer stands in for it.
+static const char nothing[1];
+static inline const char *or_empty(const char *p) { return p ? p : nothing; }
+
 static inline faf_string view(const header *h, size_t i) {
   return (faf_string){.start = h->data + h->starts[i],
                       .end = h->data + h->ends[i]};
@@ -83,7 +88,7 @@ static void *carve(builder *bd, size_t bytes) {
 
 static inline faf_batch done(builder *bd, const char *data, const int64_t *starts,
                              const int64_t *ends, size_t n, uint32_t flags) {
-  bd->h->data = data;
+  bd->h->data = or_empty(data);
   bd->h->starts = starts;
   bd->h->ends = ends;
   bd->h->n = n;
@@ -98,6 +103,7 @@ static inline faf_batch done(builder *bd, const char *data, const int64_t *start
 faf_batch faf_batch_split(faf_arena *arena, const char *data, size_t len,
                           char sep) {
   // (len 0: data may be NULL, so no kernel sees it)
+  data = or_empty(data);
   size_t n = len ? faf_k_count_byte(data, len, sep) + 1 : 1;
   builder bd;
   if (n > SIZE_MAX / 16 || !start(&bd, arena, 2 * n * sizeof(int64_t)))
@@ -189,7 +195,7 @@ void faf_batch_lengths(faf_batch b, int64_t *out) {
 void faf_batch_find(faf_batch b, const char *needle, size_t needle_len,
                     int64_t *out) {
   header *h = hdr(b);
-  faf_string sub = faf_string_init_n(needle, needle_len);
+  faf_string sub = faf_string_init_n(or_empty(needle), needle_len);
   for (size_t i = 0; h && i < h->n; ++i) {
     size_t at = faf_string_find(view(h, i), sub);
     out[i] = at == FAF_NPOS ? -1 : (int64_t)at;
@@ -199,7 +205,7 @@ void faf_batch_find(faf_batch b, const char *needle, size_t needle_len,
 void faf_batch_count(faf_batch b, const char *needle, size_t needle_len,
                      int64_t *out) {
   header *h = hdr(b);
-  faf_string sub = faf_string_init_n(needle, needle_len);
+  faf_string sub = faf_string_init_n(or_empty(needle), needle_len);
   for (size_t i = 0; h && i < h->n; ++i)
     out[i] = (int64_t)faf_string_count(view(h, i), sub);
 }
@@ -209,7 +215,7 @@ void faf_batch_count(faf_batch b, const char *needle, size_t needle_len,
   size_t name(faf_batch b, const char *needle, size_t needle_len,              \
               uint8_t *out) {                                                  \
     header *h = hdr(b);                                                        \
-    faf_string sub = faf_string_init_n(needle, needle_len);                    \
+    faf_string sub = faf_string_init_n(or_empty(needle), needle_len);                    \
     size_t yes = 0;                                                            \
     for (size_t i = 0; h && i < h->n; ++i) {                                   \
       out[i] = f(view(h, i), sub);                                             \
@@ -342,6 +348,9 @@ void faf_batch_ascii_case_inplace(faf_batch b, int upper) {
 int64_t faf_batch_join(faf_batch b, const char *sep, size_t sep_len, char *dst) {
   header *h = hdr(b);
   int64_t at = 0;
+  char none[1];
+  dst = dst ? dst : none; // only when there is nothing to write
+  sep = or_empty(sep);
   for (size_t i = 0; h && i < h->n; ++i) {
     if (i > 0) {
       faf_memcpy(dst + at, sep, sep_len);
