@@ -17,10 +17,11 @@ the others. Plain Python works on `bytes` (ASCII semantics, like faf).
 - **Making new bytes: even with pyarrow.** Since results come from a faf
   arena (below), a plain `lower()` runs at pyarrow's best-of-N speed from
   32 B lines up (1.0x; 0.8x at 8 B), 15-89x faster than plain Python. The
-  first call in a fresh process, where no memory is warm yet, is even at
-  8 B but ~2x slower than pyarrow's at 128 B and 4 KB, for reasons not yet
-  identified (not pyarrow's fresh memory, see below). Short-string
-  `lengths` and `startswith` are slightly faster in pyarrow.
+  first call in a fresh process is about even with pyarrow's when both write
+  to fresh memory; pyarrow built from a Python list looks 2x faster there,
+  but only because it reuses pages its own builder freed (see "The cold
+  gap"). Short-string `lengths` and `startswith` are slightly faster in
+  pyarrow.
 - **Pipelines:** load 529 MB of log lines, keep the 2% with ERROR, lower case
   them, write them out: faf 0.30 s, pyarrow 1.52 s, plain Python 2.03 s
   (streaming line by line: 1.93 s). faf is 5-7x faster end to end.
@@ -172,8 +173,35 @@ memory that is already mapped, which is what pyarrow's memory pool does too.
 | pyarrow `ascii_lower` | 0.3 | 1.1 | 4.2 | 16.6 | 133 |
 
 First call in a fresh process: 8 B 1.0 vs 1.4 ns (faf faster), 128 B 20.2
-vs 13.4, 4 KB 508 vs 242. Batch size: `lower` beats plain Python 1.9x at
+vs 13.4, 4 KB 508 vs 242 (explained below: pyarrow's call wasn't cold). Batch size: `lower` beats plain Python 1.9x at
 100 strings and 18-22x from 10,000. Everything else as before.
+
+## The cold gap, explained (`aedefe5` + the cold table below)
+
+The first `lower` in a fresh process was ~2x slower than pyarrow's at 128 B
+and 4 KB, repeatably. Counting page faults during the call
+(`ru_minflt`) found it: faf's 32 MB output takes ~2,048 faults (16 KB
+pages, all fresh); pyarrow's takes ~95, although its pool grows by 32 MB.
+`pa.array(list)` grows its buffers by doubling and frees the smaller ones,
+and mimalloc keeps them mapped: `ascii_lower`'s output lands in pages the
+builder already paid for. Built without a builder
+(`pa.Array.from_buffers`), pyarrow's output faults like faf's and is no
+faster:
+
+```
+
+lower, first call in a fresh process: ns per string, median of 5 (page faults during the call)
+  lines                   faf  pyarrow, built from a list  pyarrow, fresh memory
+  ------  -------------------  --------------------------  ---------------------
+  8 B      1.1 (2,049 faults)            1.1 (701 faults)     1.4 (1,825 faults)
+  128 B   18.8 (2,046 faults)            14.1 (96 faults)    17.6 (2,033 faults)
+  4096 B   498 (2,048 faults)             238 (95 faults)     540 (2,050 faults)
+```
+
+So the gap was where the fault cost was counted, not a difference in speed:
+pyarrow paid it while building its input. End to end (the pipelines), both
+pay it once. (`MemoryPool.release_unused()` before the call returns only
+part of that memory: ~232 faults.)
 
 <details><summary>Full output</summary>
 

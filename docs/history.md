@@ -468,9 +468,8 @@ pyarrow's best-of-N from 32 B lines up. Fresh output is what remains: a new
 reused memory. In a fresh process pyarrow is ~2x faster at 128 B and 4 KB
 (medians of 7 processes). The first explanation, that its allocator gets new
 memory faster, was checked and is wrong: fresh 33 MB through its pool
-(mimalloc) filled at 6.1 GB/s against 8.0 GB/s for a `bytearray`, and in
-isolation faf's cold lower was the faster one. The benchmark's cold gap is
-not explained yet.
+(mimalloc) filled at 6.1 GB/s against 8.0 GB/s for a `bytearray`. (Section
+12 finds the actual cause.)
 
 ## 12. Results in a faf arena (09-29)
 
@@ -492,8 +491,17 @@ Tests plant a lease that never releases and a result that drops its lease;
 both fail them.
 
 `lower()` now equals pyarrow's best-of-N at every length from 32 B, with no
-`out=`. The first call in a fresh process still pays fresh pages; that
-comparison's ~2x gap at 128 B and 4 KB remains unexplained.
+`out=`. The first call in a fresh process still pays fresh pages.
+
+**The cold gap.** That first call was ~2x slower than pyarrow's at 128 B and
+4 KB. Page faults during the call settled it: faf's 32 MB output took ~2,048
+(every 16 KB page fresh), pyarrow's ~95 while its pool grew by 32 MB. The
+benchmark built pyarrow's input with `pa.array(list)`, whose builder grows
+buffers by doubling and frees the smaller ones; mimalloc keeps them mapped,
+and `ascii_lower` wrote into them. Built with `from_buffers` instead (no
+builder), pyarrow faults like faf and is no faster (128 B: 17.6 vs 18.8 ns;
+4 KB: 540 vs 498; 8 B: 1.4 vs 1.1). The gap was where the fault cost was
+counted. The cold table now shows both pyarrow builds and the fault counts.
 
 ## Lessons
 
@@ -509,6 +517,8 @@ comparison's ~2x gap at 128 B and 4 KB remains unexplained.
   built: with second-resolution timestamps, `make` can skip the rebuild.
 - **Speed a kernel up, then check where the time went.** A 3.9x faster kernel
   moved Python's `lower` by 0-50%: the allocation around it was the cost.
+- **Count what the OS does, not just the time.** Page faults explained in one
+  run a cold gap that timing alone had attributed to the wrong thing twice.
 - **Keep an oracle.** Every backend is checked against the `ref` kernels at
   every length and alignment; it caught each assembly bug before a benchmark
   could.

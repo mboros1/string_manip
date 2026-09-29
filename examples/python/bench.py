@@ -273,20 +273,30 @@ def summarize(collected, lengths):
 
 
 def cold_lower(args):
-    """lower once, in a fresh process: no warm memory for anyone (faf's
-    bytearray or pyarrow's pool), as in a script that runs once."""
+    """lower once, in a fresh process (median of 5 processes), with the page
+    faults the call took. pyarrow is shown two ways: built from a list, as
+    usual, its builder frees memory while growing, which its pool keeps and
+    lower then reuses (so the call is not cold); built without a builder, its
+    output gets fresh pages like faf's."""
+    impls = ["faf"] + (["pyarrow", "pyarrow-fresh"] if pa else [])
     rows = []
     for length in (8, 128, 4096):
-        cells = []
-        for impl in ("faf", "pyarrow") if pa else ("faf",):
-            out = subprocess.run([sys.executable, __file__, "--worker", f"cold-lower-{impl}",
-                                  str(length), str(args.bytes)],
-                                 capture_output=True, text=True, check=True)
-            cells.append(json.loads(out.stdout.strip().splitlines()[-1])["ns"])
-        rows.append([f"{length} B"] + [fmt_ns(c) for c in cells] +
-                    ([ratio(cells[1], cells[0])] if len(cells) > 1 else []))
-    table("lower, first call in a fresh process (ns per string)",
-          ["lines", "faf", "pyarrow", "pyarrow/faf"][:len(rows[0])], rows)
+        row = [f"{length} B"]
+        for impl in impls:
+            runs = []
+            for _ in range(5):
+                out = subprocess.run([sys.executable, __file__, "--worker",
+                                      f"cold-lower-{impl}", str(length), str(args.bytes)],
+                                     capture_output=True, text=True, check=True)
+                runs.append(json.loads(out.stdout.strip().splitlines()[-1]))
+            runs.sort(key=lambda r: r["ns"])
+            mid = runs[len(runs) // 2]
+            row.append(f"{fmt_ns(mid['ns'])} ({mid['faults']:,} faults)")
+        rows.append(row)
+    table("lower, first call in a fresh process: ns per string, median of 5 "
+          "(page faults during the call)",
+          ["lines", "faf", "pyarrow, built from a list", "pyarrow, fresh memory"][:len(impls) + 1],
+          rows)
 
 
 def cold_lower_worker(impl, length, total):
@@ -296,14 +306,22 @@ def cold_lower_worker(impl, length, total):
         batch = faf.Buffer.from_bytes(b"\n".join(lines)).split(b"\n")
         fn = batch.lower
     else:
-        arr = pa.array(lines, pa.large_string())
+        if impl == "pyarrow":
+            arr = pa.array(lines, pa.large_string())
+        else:  # the same array, handed over without a builder
+            b = faf.Batch.from_list(lines)
+            arr = pa.Array.from_buffers(pa.large_string(), b.n, [
+                None, pa.py_buffer(b.starts.owner), pa.py_buffer(b.buffer.obj)])
         fn = lambda: pc.ascii_lower(arr)  # noqa: E731
         pc.ascii_lower(pa.array(["A"]))  # start the compute engine first
     del lines
     gc.collect()
+    f0 = resource.getrusage(resource.RUSAGE_SELF).ru_minflt
     t0 = time.perf_counter()
     fn()
-    print(json.dumps({"ns": (time.perf_counter() - t0) * 1e9 / n}))
+    t = time.perf_counter() - t0
+    faults = resource.getrusage(resource.RUSAGE_SELF).ru_minflt - f0
+    print(json.dumps({"ns": t * 1e9 / n, "faults": faults}))
 
 
 # ---- 2. pipeline (time and peak memory) ----
