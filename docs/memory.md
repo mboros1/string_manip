@@ -42,26 +42,20 @@ faf_string s = faf_string_to_lower(r, line);
 faf_region_release(r);
 ```
 
-`faf_arena_init` puts a few bytes of bookkeeping at the start of the buffer
-and splits the rest evenly into pools, aligned to the slot size;
-`faf_arena_bytes(npools, pool_slots)` says how much memory a given shape needs.
-The memory can come from anywhere: a static array, the stack, `malloc`,
-`mmap`, or a buffer owned by another language's runtime.
+`faf_arena_init` puts the pool bookkeeping at the start of the buffer and
+splits the rest evenly into pools; `faf_arena_bytes(npools, pool_bytes)` says
+how much buffer that takes. The buffer can come from anywhere: static, the
+stack, `malloc`, `mmap`, or memory another language owns. `faf_arena_fini`
+retires an arena; its handles are rejected from then on.
 
-Nothing is shared between arenas, so the rule for threads is simple: an arena
-and its regions belong to one thread at a time, and threads that each have
-their own arena never contend. The default arena is one arena like any other,
-so it belongs to one thread too.
+Arenas sit in a table of `FAF_MAX_ARENAS` entries (16, the default arena
+included). A region handle is a 64-bit integer naming the entry, the pool and
+its generation, the same in every build, so it can cross a foreign function
+interface, and a stale one is rejected rather than read through. Default-arena
+handles skip the table.
 
-Re-initializing an arena resets its generations, so handles from before it
-are not detected as stale: release them first.
-
-Arenas are registered in a table of `FAF_MAX_ARENAS` entries (16 by
-default, the default arena included); `faf_arena_fini` frees an entry. Region
-handles are 64-bit integers naming the table entry, the pool and its
-generation, the same in every build, so a handle from a released region or a
-retired arena is rejected rather than read through. Handles of the default
-arena skip the table, so plain C use costs what it did before arenas.
+Threads: an arena and its regions belong to one thread at a time; threads
+with their own arenas never contend.
 
 ## Rings
 

@@ -297,212 +297,65 @@ slower) and 7.5 KB at peak.
 
 ## 8. Arenas over caller memory (09-29)
 
-Motivated by bindings: a Python example shim (and any other language's) needs
-memory it controls, sized for the job, one set per thread. The static pools
-were global, capped at build time, and not thread-safe. Thread-local pools
-were considered and rejected: they patch the global state rather than remove
-it, and `_Thread_local` is not something freestanding and ESP32 builds can
-count on.
+Bindings and threads need pools they size and own, so the static pools became
+the default *arena* and more can be laid over any buffer (`5a3bd81`). A
+first version put the arena pointer in the region handle; a build option
+(`FAF_ARENAS=0`) then removed it again for the boards, where it cost ~2% of
+region work and 10-18% of acquire/release. Both were replaced in section 11.
 
-Instead, layer 1 of the allocator (section 0) became a value (`5a3bd81`):
-`faf_arena` holds the slot storage, the pool states and the sizes, and
-`faf_arena_init` lays one over any buffer (bookkeeping at the start, the rest
-split evenly into pools, aligned to the slot size). The static pools are the
-default arena, so `faf_region_acquire` and every build option behave as
-before. Region handles carry their arena (4 -> 16 bytes, still passed in
-registers), which kept every allocating function's signature unchanged:
-layers 2 and 3 only read sizes from the arena instead of constants.
+## 9. Batches, and Python through ctypes (09-29)
 
-Tested with planted bugs, one at a time, on a direct compile: a pool one slot
-too large, unaligned slots, unaligned pool states, a missing NULL-arena check,
-an off-by-one bound, the default arena's size used for another arena, and a
-generation that isn't bumped. The first round of this passed every mutant,
-because `make` here (GNU make 3.81) compares timestamps to the second: an
-edit within a second of the restore didn't rebuild `faf_string_mem.o` or
-`libfaf.a`, and the "clean" run afterwards was testing a mutant. Rebuilt
-directly, all but two failed; the survivors were misalignment, which the M1
-tolerates. Slot alignment is a documented promise, so the test now asserts
-it; pool-state alignment is private, and `-fsanitize=alignment` catches it.
+A binding should be a page of declarations, so the loops over many strings
+live in C (`faf_batch`, `21948ae`): one call per batch, only pointers and
+integers, nothing that depends on build options. Arrow's offsets can't hold
+the result of a split (separators sit between the strings), so a batch is
+separate `starts[]` and `ends[]`; Arrow data is still a batch without a copy.
+The Python example (`examples/python`) is ctypes and the standard library,
+checked against plain Python with bugs planted in the shim.
 
-Cost, M1 (recorded run against `73e3bdb`): record processing 100.5 -> 100.2
-ns, small copies unchanged. Acquire + release got faster with 0 or 6 of 12
-pools held (6.6 -> 5.6 ns) and slower with 11 held (6.8 -> 7.5 ns): the scan
-no longer has a constant trip count. Copies of 1 KB were 4% slower in both
-the interleaved and the recorded runs (19.9 -> 20.8 ns), within the Mac's
-noise but consistent. Rows the change can't affect (malloc, libc `strlen`,
-the `ref` kernels) moved by 3-7% in the same run, which sets the noise floor.
-
-**On the boards, and making it optional.** The S3 (`6a5616b`, against
-`7b638d5`) showed region operations 2-7% slower, but that comparison spanned
-the ring and benchmark commits too, and code placement has moved S3 results
-before (section 4). Two things followed. `FAF_ARENAS=0` (`839a925`) builds
-without arenas: the default arena becomes a `static const` that every handle
-refers to, so the compiler folds its sizes back to the build constants,
-without a second copy of the allocator (on Xtensa at -O2, one extra
-instruction in `faf_reserve` against the pre-arena code). And `ESP32_DEFINES`
-(`cf5a35f`) passes definitions to the board apps, with the setting shown in
-the bench header and in RESULTS.md, so the flag could be tested alone:
-same commit, same board, arenas on vs off.
-
-| `cf5a35f`, on -> off | ESP32 | ESP32-S3 |
-|---|---:|---:|
-| acquire + release, 0 / 3 of 4 held | 334 / 496 -> 288 / 404 ns | 279 / 404 -> 242 / 334 ns |
-| acquire + reserve + release | 648 -> 585 ns | 558 -> 503 ns |
-| `faf_string_copy` + release | 753 -> 737 ns | 701 -> 685 ns |
-| record processing | 7738 -> 7578 ns | 6015 -> 5885 ns |
-| kernels, ring, builder | within 1% | within 1% |
-
-The indirection is the whole cost: acquire/release 10-18%, anything that
-allocates about 2%, nothing else. With arenas off the S3's copy + release is
-684.9 ns, as before arenas.
-
-**Defaults.** Turning arenas off on microcontrollers looked like the sensible
-default ("static memory, one thread"), but arenas don't use the heap, and
-typical ESP-IDF firmware runs several FreeRTOS tasks on two cores: with only
-the default arena, tasks sharing it would need a lock around every region
-operation, while with arenas each task gets its own static buffer. The cost
-is bounded: arena init once, 40-90 ns more per region lifetime, a few cycles
-per allocation, nothing for code that doesn't allocate. So arenas stay on by
-default everywhere, the board apps included, and `FAF_ARENAS=0` is opt-in for
-firmware where one task does all the string work.
-
-## 9. Batches for bindings, and a Python example (09-29)
-
-Goal: a binding in any language should be a tiny shim. That decided the
-design before any code: the loops over many strings live in C, behind an API
-of out-of-line functions taking only pointers and integers, with nothing
-that depends on build options (`faf_region` is 16 or 4 bytes depending on
-`FAF_ARENAS`, so it can't cross an FFI). Python's ctypes was chosen for the
-example because loading a library and declaring functions is how almost every
-language does FFI, and the example needs only the standard library, so it
-runs anywhere ctypes does.
-
-**`faf_batch`** (`21948ae`): Arrow's offsets layout was the first plan, but
-it can't hold the result of a split (string i must end where i + 1 begins,
-and separators sit between lines). So a batch is `starts[]` and `ends[]`
-into one buffer: `faf_string`'s pair, as offsets. An Arrow array is still a
-batch without copying (`starts = offsets`, `ends = offsets + 1`), and filter
-and take only make new views. 17 functions, each the per-string function in a
-loop; tested against reference implementations written in the test, with
-planted bugs (7 of 8 caught; the survivor, `FAF_NPOS` mapped to -1, is the
-same value either way).
-
-**On the boards.** The new test's static buffers linked on the original
-ESP32 once shrunk, but then FreeRTOS couldn't allocate its idle task at
-startup: static data comes out of the same internal RAM. The buffers are now
-allocated per test (`e14f0c2`). The batch benchmark then crashed on the S3
-with `StoreProhibited`: its 44 KB malloc failed, because the kernels group had
-been leaking 44 KB of line copies all along (`1bb9d06`). Measured
-(`425ce68`): on the S3 and M1 the batch split is 1.25x / 1.45x faster than a
-`next_token` loop (64 separators per scan), but on the original ESP32 it is
-1.38x slower, the SWAR `find_bytes` not paying off there; and hashing costs
-~12 us per 110-byte line on both boards (64-bit multiplies in software on a
-32-bit core).
-
-**Python** (`95af983`, results in `examples/python/RESULTS.md`): searches,
-counts and filters are 4-52x faster than plain Python and up to 56x faster
-than pyarrow; a 529 MB grep-lower-write pipeline runs in 0.30 s vs 1.52 s
-(pyarrow) and 2.03 s (Python). Lower casing loses to pyarrow 4-30x: the
-kernel is the library's slowest (10.7 GB/s vs ~30 GB/s for pyarrow's), it is
-called per string rather than once over the buffer, and the shim allocates a
-new zero-filled output each call. Batches pay off from about 100 strings per
-call; ingesting a Python list costs 3.5-6x pyarrow's. Two measurement traps
-on the way: Python caches the hash of a `bytes` object, so hashing had to be
-timed on fresh copies; and pyarrow starts its compute engine on first use
-(~0.2 s), so every pipeline variant warms up on a tiny file first.
+On the boards the new tests' static buffers left the ESP32 no RAM for
+FreeRTOS (now allocated per test, `e14f0c2`), and the kernels benchmark group
+turned out to leak 44 KB per run (`1bb9d06`).
 
 ## 10. The lower case kernel (09-29)
 
-The Python results blamed three things for losing `lower` to pyarrow; the
-kernel was first. NEON/SSE2 (`dcbad6c`): the loop did 16 bytes at a time with
-the tail test inside it; now 64 bytes in four independent vectors with the
-last block loaded up front, two overlapping blocks for 17-32 bytes, and
-overlapping 8 / 4 byte words below 16 (it was a byte at a time). Measured
-alternately against the old kernel in separate files (in the same file the
-compiler inlined the old one into the timing loop, which flattered it): 3.9x
-at 4 KB (40.9 GB/s), 2x at 512 B, 3-5x at 7-15 B; exactly 16 B is 0.4 ns
-slower (the block is converted twice). One trap: a small helper wasn't
-inlined, so the kernel saved eight registers on every entry, including the
-16 byte path; `always_inline` fixed it. SWAR (the boards): the loop called
-`to_case(x, upper)`, which GCC turned into both cases plus a branch and two
-constant reloads per word, ~25 cycles per word; the constants are now chosen
-before the loop and it does two words per iteration (the same inlining trap
-again, on Xtensa).
+Python's first results lost lower casing to pyarrow 4-30x. The kernel was
+the library's slowest: NEON did 16 bytes per iteration with the tail test in
+the loop; it now does 64 in four vectors, and strings under 16 bytes as
+overlapping words (`dcbad6c`): 10.7 -> 41.4 GB/s on the M1. The SWAR loop
+computed both cases and branched per word; with the constants hoisted it
+doubled on both boards (38 -> 76 MB/s). Twice a small helper wasn't inlined,
+which cost register saves on every call.
 
-Recorded (`c6f6d89` against `bc6679c`): kernel 10.7 -> 41.4 GB/s on the M1,
-38 -> 76 MB/s on the ESP32 and 40 -> 80 MB/s on the S3; batch lower 32-43%
-faster everywhere, and churn (which lower cases its keys) 20% faster on both
-boards. On the way, `faf_batch` and `bench_batch` were added to the boards'
-IRAM list (`ab244f5`); it changed nothing, since the loops were cache resident.
+The faster kernel barely moved Python's `lower`: 57-64% of the time was the
+shim allocating a new `bytearray` per result. Converting the whole range in
+one pass (as pyarrow does) and taking results from a faf arena, reused
+across calls, brought `lower` level with pyarrow (`aedefe5`). A remaining
+"cold" 2x gap was traced with page fault counts to pyarrow reusing pages its
+own input builder had freed; with fresh memory on both sides they are even.
 
-In Python, `lower` barely moved (128 B lines 20.6 -> 23.1 ns, 4 KB 797 ->
-638 ns): measured separately, the C call into reused buffers is now within
-20% of pyarrow, and 57-64% of the time is the shim allocating a fresh
-`bytearray` per result. The next fixes are on the Python side.
+## 11. Consolidation (09-29)
 
-## 11. Lower case from Python: one pass, and reused memory (09-29)
+An audit of the session found layers patching earlier choices: a `faf_ffi_*`
+wrapper existed because region handles changed layout with `FAF_ARENAS`, and
+the shim carried layout and strategy logic every binding would repeat. So:
 
-With the kernel on par, two costs were left, both about memory rather than
-bytes. `faf_batch_ascii_case` called the kernel per string and packed the
-results; pyarrow converts its whole data buffer once and keeps the offsets.
-The batch API now has the same: `faf_batch_ascii_case_range` (the caller
-knows the range: views in order, as after a split or from Arrow),
-`faf_batch_ascii_case_span` (scattered views: find the range, convert it,
-shift the views) and `faf_batch_ascii_case_inplace` (only bytes inside
-views). The shim marks batches `dense` when their range is known without a
-scan: the first version scanned the views twice (for the range, then the
-total) and that alone cost 3x at 8 B lines. In C on the M1 one pass is 3.6x
-faster than a call per line; on both boards 1.9x (`b87c9c1`).
+- **One handle layout** (`6e7ad99`): arenas are opaque and registered in a
+  small table; a region is a 64-bit integer (table entry, epoch, generation,
+  pool). A handle from a retired arena is rejected instead of read through.
+  `FAF_ARENAS` and `faf_ffi_*` went. The table cost a dependent load per
+  region operation (acquire + release 5.6 -> 11 ns on the M1); default-arena
+  handles now skip it, leaving acquire + release at 6.0 ns and whole-record
+  work within 2%.
+- **Batches are handles** (`616d07a`): a batch lives in a region (a header,
+  its views, the bytes of results), C knows whether its views are in order
+  and picks the lower case strategy, and one `faf_batch_free` releases it.
+  Four lower case entry points became one plus in place.
+- **The shim** keeps handles, garbage collection and interop only
+  (`6f00703`): 393 lines, down from 505, over one arena of 64 x 1 GB of
+  address space.
 
-Tests planted two bugs that passed at first (views not shifted, reading from
-the buffer's start): random views always began at 0, where both are no-ops.
-The test now keeps the range off 0.
-
-In place was kept opt-in and only for `bytearray`: `bytes` are immutable,
-writing a copy-on-write mapped file copies each page anyway, and batches
-share buffers, so other views see the change.
-
-Result (`examples/python/RESULTS.md`): with `out=` reused, `lower` equals
-pyarrow's best-of-N from 32 B lines up. Fresh output is what remains: a new
-`bytearray` or anonymous `mmap` fills at ~8 GB/s against ~31 GB/s into
-reused memory. In a fresh process pyarrow is ~2x faster at 128 B and 4 KB
-(medians of 7 processes). The first explanation, that its allocator gets new
-memory faster, was checked and is wrong: fresh 33 MB through its pool
-(mimalloc) filled at 6.1 GB/s against 8.0 GB/s for a `bytearray`. (Section
-12 finds the actual cause.)
-
-## 12. Results in a faf arena (09-29)
-
-The arenas of section 8 were built for bindings, but the batch API's rule
-("the library never allocates") led the Python shim to a new `bytearray`
-per result, and that allocation became the cost once the kernel was fast.
-Asked what pyarrow does: its pool (mimalloc here) doesn't zero memory and
-keeps what is freed, so its best-of-N runs reuse mapped pages. So the shim
-now does the same with faf's allocator (`aedefe5`). The arena and region
-structs depend on build options and can't cross an FFI, so `faf_batch.h`
-wraps them: the caller allocates `faf_ffi_arena_size()` bytes for the arena,
-`faf_ffi_arena_bytes` sizes its buffer exactly, and a region is an opaque
-integer (pool + 1, generation above it). `faf.Arena` lays one over an
-anonymous mapping (address space until used); each result takes a region
-and a lease that gives it back when the result is collected (under a lock:
-that can happen on any thread); results too big for a region fall back to a
-`bytearray`; `to_arrow` copies out, since pyarrow may outlive the batch.
-Tests plant a lease that never releases and a result that drops its lease;
-both fail them.
-
-`lower()` now equals pyarrow's best-of-N at every length from 32 B, with no
-`out=`. The first call in a fresh process still pays fresh pages.
-
-**The cold gap.** That first call was ~2x slower than pyarrow's at 128 B and
-4 KB. Page faults during the call settled it: faf's 32 MB output took ~2,048
-(every 16 KB page fresh), pyarrow's ~95 while its pool grew by 32 MB. The
-benchmark built pyarrow's input with `pa.array(list)`, whose builder grows
-buffers by doubling and frees the smaller ones; mimalloc keeps them mapped,
-and `ascii_lower` wrote into them. Built with `from_buffers` instead (no
-builder), pyarrow faults like faf and is no faster (128 B: 17.6 vs 18.8 ns;
-4 KB: 540 vs 498; 8 B: 1.4 vs 1.1). The gap was where the fault cost was
-counted. The cold table now shows both pyarrow builds and the fault counts.
-
+## Lessons
 ## Lessons
 
 - **On in-order cores, codegen details are the performance.** A taken branch,
@@ -515,8 +368,6 @@ counted. The cold table now shows both pyarrow builds and the fault counts.
   instruction for the job (`bnone`), which the SWAR habit had missed.
 - **Check that the test can fail.** A mutant that passes may not have been
   built: with second-resolution timestamps, `make` can skip the rebuild.
-- **Speed a kernel up, then check where the time went.** A 3.9x faster kernel
-  moved Python's `lower` by 0-50%: the allocation around it was the cost.
 - **Count what the OS does, not just the time.** Page faults explained in one
   run a cold gap that timing alone had attributed to the wrong thing twice.
 - **Keep an oracle.** Every backend is checked against the `ref` kernels at

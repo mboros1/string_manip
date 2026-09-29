@@ -1,15 +1,10 @@
 # Python example
 
-FaF from Python through `ctypes`: the library's batch API
-([`src/faf_batch.h`](../../src/faf_batch.h)) and a page of declarations.
-It needs only the standard library; numpy and pyarrow are used for
-conversions when they are installed.
-
-This is an example of how small a binding can be, not a Python package. The
-same declarations work in any language that can call C (Rust `extern "C"`,
-Go cgo, Julia `ccall`, Java's FFM API, C# P/Invoke, Node koffi): the batch API
-takes only pointers and integers, allocates nothing, and doesn't depend on
-how the library was built.
+FaF from Python through `ctypes`: the batch API
+([`src/faf_batch.h`](../../src/faf_batch.h)) and a page of declarations. Only
+the standard library is needed; numpy and pyarrow are used for conversions
+when installed. It is an example of how small a binding can be, not a
+package: the same declarations work from any language that can call C.
 
 ```sh
 make shared                           # obj/libfaf.dylib or .so
@@ -20,61 +15,28 @@ python3 examples/python/bench.py      # vs plain Python and pyarrow (--quick)
 ```python
 import faf
 
-buf = faf.Buffer.from_file("app.log")        # mmap: nothing is copied
-lines = buf.lines()                           # views, 16 bytes per line
+lines = faf.Buffer.from_file("app.log").lines()   # mmap; views in C
 errors = lines.filter(lines.contains(b"ERROR"))
-print(len(errors), errors.head(3))            # bytes are made only here
+print(len(errors), errors.head(3))                # bytes for Python made here
 with open("errors.log", "wb") as f:
     f.write(errors.lower().join(b"\n"))
 ```
 
-## How it works
+- A `Batch` is a handle to a batch in a faf arena: its views, and the bytes of
+  results like `lower`, live in C. Python collecting the `Batch` frees it.
+- Per-string results (`find`, `count`, `contains`, masks, hashes) come back as
+  `array.array`; `faf.to_numpy()` views them without a copy.
+- Bytes cross into Python only on indexing, iteration, `head`, `join` and
+  `to_arrow`. `Batch.from_arrow` takes Arrow data without copying it.
+- The arena is one anonymous mapping of 64 regions of 1 GB: address space,
+  not memory, until used. Each live batch holds a region, so one result is at
+  most 1 GB, and `MemoryError` means no region was free.
+- Strings are bytes; case functions are ASCII only, like `bytes.lower()`.
+  `lower(inplace=True)` works on batches over a `bytearray`.
 
-- A `Buffer` holds bytes: a file mapped with `mmap` (copy-on-write, so it has
-  an address and is never copied), `bytes`, or a `bytearray`.
-- A `Batch` is views into one buffer, as two int64 arrays: string i is
-  `data[starts[i]:ends[i]]`, the same start/end pair as a `faf_string`.
-  Splitting, filtering and taking make new views, not new bytes.
-- Every operation is one call into C for the whole batch, and ctypes
-  releases the GIL for it. Results are `array.array`s (int64 positions and
-  counts, uint8 masks, uint64 hashes); `faf.to_numpy()` views them in numpy
-  without a copy.
-- Bytes are created only by indexing (`b[i]`, iteration, `head`) and by the
-  operations that write new strings: `lower`, `upper`, `compact`, `join`.
-- Those results live in a faf arena, the library's own allocator: regions of
-  one large anonymous mapping, taken per result and given back when the
-  result is garbage collected. Later results reuse memory that is already
-  mapped, which costs about a quarter of fresh memory. Results too big for a
-  region (256 MB by default) get a `bytearray`. `faf.use_arena(faf.Arena(...))`
-  sizes it, `faf.use_arena(None)` turns it off, and `out=` writes into a
-  buffer you provide. `join` returns a `bytearray` you keep, and `to_arrow`
-  copies out of the arena, since pyarrow may keep the array longer than the
-  batch lives.
-- `lower(inplace=True)` changes the strings where they are, for batches over
-  a `bytearray` only.
-- `Batch.from_arrow` / `to_arrow` convert pyarrow binary and string arrays
-  without copying the bytes (Arrow's offsets are a batch as they are:
-  `starts = offsets`, `ends = offsets + 1`). `Batch.from_list` copies a list
-  of `str`/`bytes` in.
+ctypes checks nothing, so `test_faf.py` is the safety net: every method
+against plain Python on random data, and bugs planted in the shim to show it
+catches them. MicroPython has no ctypes; there the same API would be wrapped
+in a C module.
 
-Strings are bytes, and case functions are ASCII only, like `bytes.lower()`
-and pyarrow's `ascii_lower`, not `str.lower()`.
-
-## Why ctypes
-
-`ctypes` checks nothing: a wrong declaration gives wrong results or a crash.
-`test_faf.py` is what guards against that, by checking every method against
-plain Python on random data (including a hash reference written in Python and
-a seed that needs all 64 bits, so a narrower declaration can't pass). For a
-first-class binding, cffi's API mode or a CPython extension would check the
-declarations at build time; the batch API would stay the same.
-
-The ~1 µs a ctypes call costs is paid once per batch, not per string. See the
-crossover section of the results for where that stops mattering.
-
-MicroPython has no ctypes; there, the same batch API would be wrapped in a
-user C module compiled into the firmware.
-
-## Results
-
-See [RESULTS.md](RESULTS.md).
+Results: [RESULTS.md](RESULTS.md).
