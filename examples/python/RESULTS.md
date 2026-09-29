@@ -156,7 +156,7 @@ through the pool against 8.0 GB/s for a `bytearray`. Medians over 7 fresh
 processes of the cold `lower` above: 128 B, faf 24.4 vs pyarrow 13.4 ns;
 4 KB, 583 vs 277 ns. Timed in isolation, faf's cold `bytearray` + kernel
 is ~18.6 ns per 128 B line and pyarrow's `ascii_lower` ~23 ns, so the gap
-comes from something in the benchmark setup that isn't identified yet. Batches of 100 strings now win `lower`
+comes from the benchmark setup: see "The cold gap, explained" below. Batches of 100 strings now win `lower`
 against plain Python 1.9x (was 1.04x). Other operations are unchanged.
 
 ## Results in a faf arena (`aedefe5`)
