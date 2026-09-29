@@ -363,6 +363,19 @@ the shim carried layout and strategy logic every binding would repeat. So:
   when they don't fit (`dc1a72e`). A batch keeps its arena alive: without
   that, a batch outliving its arena freed itself into unmapped memory.
 
+## 12. Back to simple regions (09-29)
+
+Section 11's result still bent the library toward the binding: an arena
+table, 64-bit handles with epochs, a region per batch, and a shim managing
+per-object lifetimes over 4,096 + 32 regions, which is malloc/free with extra
+steps. The README's model is simpler: a region is a unit of work, and what is
+made in it goes with it. So (`8246e53`) region handles are back to
+`{arena, pool, gen}` and arenas to a plain struct (`faf_arena_size()` for
+bindings), and a batch is an ordinary allocation in the region the caller
+passes. The Python example follows (`8e88e29`): `with faf.region() as r:`,
+batches unusable after the block, results optionally `into` another region.
+A Python library that hides lifetimes can be built on top.
+
 ## Lessons
 ## Lessons
 

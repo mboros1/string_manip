@@ -5,7 +5,7 @@ slots over one block of memory. The default arena is static storage, sized at
 build time; others can be laid over any memory you provide, sized at run time.
 
 - **Regions.** A region is one pool. `faf_region_acquire` takes a free pool of
-  the default arena (`faf_arena_acquire(a)` of another one), allocations bump
+  the default arena (`faf_arena_acquire(&a)` of another one), allocations bump
   through it, and `faf_region_release` frees everything in it at once. Handles
   carry their arena and a generation number, so a released region can't be
   used by mistake. Functions that allocate return `FAF_STRING_NONE` when the
@@ -33,26 +33,19 @@ runs the suite with 2 × 1 KB pools.
 
 ```c
 static char buf[1 << 20];
-static _Alignas(16) char arena_mem[16];  // >= faf_arena_size() bytes
-faf_arena *a = (faf_arena *)arena_mem;
-faf_arena_init(a, buf, sizeof buf, 8);   // 8 pools, ~128 KB each
-faf_region r = faf_arena_acquire(a);
+faf_arena a;
+faf_arena_init(&a, buf, sizeof buf, 8);  // 8 pools, ~128 KB each
+faf_region r = faf_arena_acquire(&a);
 faf_string s = faf_string_to_lower(r, line);
 ...
 faf_region_release(r);
 ```
 
 `faf_arena_init` puts the pool bookkeeping at the start of the buffer and
-splits the rest evenly into pools; `faf_arena_bytes(npools, pool_bytes)` says
-how much buffer that takes. The buffer can come from anywhere: static, the
-stack, `malloc`, `mmap`, or memory another language owns. `faf_arena_fini`
-retires an arena; its handles are rejected from then on.
-
-Arenas sit in a table of `FAF_MAX_ARENAS` entries (16, the default arena
-included). A region handle is a 64-bit integer naming the entry, the pool and
-its generation, the same in every build, so it can cross a foreign function
-interface, and a stale one is rejected rather than read through. Default-arena
-handles skip the table.
+splits the rest evenly into pools; `faf_arena_bytes(npools, pool_slots)` says
+how much buffer a given shape needs. The buffer can come from anywhere:
+static, the stack, `malloc`, `mmap`, or memory another language owns
+(`faf_arena_size()` gives the struct's size to code that can't see it).
 
 Threads: an arena and its regions belong to one thread at a time; threads
 with their own arenas never contend.
