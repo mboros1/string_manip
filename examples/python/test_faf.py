@@ -223,6 +223,64 @@ def test_case_modes():
         os.unlink(f.name)
 
 
+def test_arena():
+    if not hasattr(faf.lib, "faf_ffi_arena_size"):
+        print("  (library built without arenas: arena test skipped)")
+        return
+    small = faf.Arena(pool_bytes=4096, npools=2)
+    faf.use_arena(small)
+    try:
+        data = b"Hello\nWORLD\nAbc"
+        lines = faf.Buffer.from_bytes(data).split()
+        r = lines.lower()
+        assert list(r) == [b"hello", b"world", b"abc"]
+        assert r.buffer.lease is not None, "result not from the arena"
+        addr = r.buffer.addr
+        del r  # gives the region back ...
+        again = lines.upper()
+        assert again.buffer.addr == addr, "dropped region not reused"
+        other = lines.lower()  # ... while `again` is alive: another region
+        assert other.buffer.addr != addr and list(again) == [b"HELLO", b"WORLD", b"ABC"]
+        # every region in use: new bytearray
+        third = lines.lower()
+        assert third.buffer.lease is None and list(third) == list(other)
+        del again, other, third
+        # too big for a region: new bytearray
+        assert 4096 <= small.capacity < 4096 + 64, small.capacity
+        big = faf.Buffer.from_bytes(b"A" * small.capacity + b"\nb").split()
+        assert big.lower().buffer.lease is None
+        # derived views keep the region: it isn't reused while they live
+        r = lines.lower()
+        kept = r.filter(array("B", [1, 0, 1]))
+        addr = r.buffer.addr
+        del r
+        assert lines.lower().buffer.addr != addr, "region reused under live views"
+        assert list(kept) == [b"hello", b"abc"]
+        # to_arrow copies out of the arena
+        try:
+            import pyarrow  # noqa: F401
+            r = lines.lower()
+            arr = r.to_arrow()
+            del r, kept
+            lines.upper(), lines.upper()  # reuse the regions
+            assert arr.to_pylist() == [b"hello", b"world", b"abc"]
+        except ImportError:
+            pass
+        # results dropped on another thread give their region back
+        import threading
+        r = lines.lower()
+        addr = r.buffer.addr
+        holder = [r]
+        del r
+        t = threading.Thread(target=holder.clear)
+        t.start()
+        t.join()
+        assert lines.lower().buffer.addr == addr
+    finally:
+        faf.use_arena(None)
+    assert faf.Buffer.from_bytes(b"A").split().lower().buffer.lease is None
+
+
 def test_arrow():
     try:
         import pyarrow as pa

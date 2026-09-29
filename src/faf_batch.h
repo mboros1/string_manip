@@ -138,4 +138,44 @@ int64_t faf_batch_join(const char *data, const int64_t *starts,
                        const int64_t *ends, size_t n, const char *sep,
                        size_t sep_len, char *dst);
 
+// ---- Memory for results, from a faf arena ----
+// For bindings that want results in faf memory that is reused, not freshly
+// allocated per call: an arena over a buffer the binding provides, regions
+// taken per result and given back when the result is dropped. The arena and
+// region structs depend on build options, so they don't cross here: the
+// arena lives in memory the caller sizes with faf_ffi_arena_size(), and a
+// region is an opaque nonzero integer. Only with arenas (FAF_ARENAS, the
+// default). One thread at a time per arena.
+
+#include "faf_string_mem.h"
+#if FAF_ARENAS
+
+// Bytes the caller provides for the arena itself (its bookkeeping lives in
+// `buf`, see faf_arena_init).
+size_t faf_ffi_arena_size(void);
+
+// Bytes of `buf` an arena of `npools` pools of at least `pool_bytes` each
+// needs (0 if that overflows).
+size_t faf_ffi_arena_bytes(size_t npools, size_t pool_bytes);
+
+// Lay an arena of `npools` pools over buf[0, nbytes), in `arena`
+// (faf_ffi_arena_size() bytes, aligned for a pointer). False on failure.
+bool faf_ffi_arena_init(void *arena, void *buf, size_t nbytes, size_t npools);
+
+// A free region of the arena, or 0 when every pool is in use.
+uint64_t faf_ffi_region_acquire(void *arena);
+
+// Bytes one region can hold (every region of an arena holds the same).
+size_t faf_ffi_region_capacity(void *arena);
+
+// `bytes` from the region, or NULL if it doesn't have room (or the handle is
+// stale). Slot aligned; the region's memory is not cleared.
+void *faf_ffi_reserve(void *arena, uint64_t region, size_t bytes);
+
+// Give the region back: everything reserved from it is free again. A stale
+// or zero handle is ignored.
+void faf_ffi_region_release(void *arena, uint64_t region);
+
+#endif // FAF_ARENAS
+
 #endif // FAF_BATCH_H

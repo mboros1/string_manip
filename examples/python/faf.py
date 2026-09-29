@@ -22,10 +22,11 @@ import itertools
 import mmap
 import os
 import sys
+import threading
 from array import array
 from ctypes import c_char, c_int, c_int64, c_size_t, c_uint64, c_void_p
 
-__all__ = ["Buffer", "Batch", "lib"]
+__all__ = ["Arena", "Buffer", "Batch", "lib", "use_arena"]
 
 
 # ---- The shim: load the library and declare the functions ----
@@ -60,6 +61,16 @@ def _declare(lib):
     }
     for name in ("contains", "starts_with", "ends_with", "eq", "eq_icase"):
         sig[f"faf_batch_{name}"] = (c_size_t, [P, P, P, c_size_t, P, c_size_t, P])
+    if hasattr(lib, "faf_ffi_arena_size"):  # built with arenas (the default)
+        sig.update({
+            "faf_ffi_arena_size": (c_size_t, []),
+            "faf_ffi_arena_bytes": (c_size_t, [c_size_t, c_size_t]),
+            "faf_ffi_arena_init": (ctypes.c_bool, [P, P, c_size_t, c_size_t]),
+            "faf_ffi_region_acquire": (c_uint64, [P]),
+            "faf_ffi_region_capacity": (c_size_t, [P]),
+            "faf_ffi_reserve": (P, [P, c_uint64, c_size_t]),
+            "faf_ffi_region_release": (None, [P, c_uint64]),
+        })
     for name, (restype, argtypes) in sig.items():
         fn = getattr(lib, name)
         fn.restype, fn.argtypes = restype, argtypes
@@ -90,6 +101,78 @@ _EMPTY = b"\0"
 _EMPTY_ADDR = ctypes.cast(ctypes.c_char_p(_EMPTY), c_void_p).value
 
 
+# ---- Result memory from a faf arena ----
+
+class Arena:
+    """faf arena for results: `npools` regions of `pool_bytes`, over an
+    anonymous mapping (the OS maps pages only when they're first written, so
+    an unused arena costs address space, not memory). Each result that fits
+    takes a region and gives it back when it is garbage collected, so later
+    results reuse memory that is already mapped instead of faulting in new
+    pages. Pages stay mapped while the arena lives, as in any memory pool."""
+
+    def __init__(self, pool_bytes=256 << 20, npools=8):
+        nbytes = lib.faf_ffi_arena_bytes(npools, pool_bytes)
+        if not nbytes:
+            raise ValueError("arena too large")
+        self._mem = mmap.mmap(-1, nbytes)
+        self._state = ctypes.create_string_buffer(lib.faf_ffi_arena_size())
+        self._base = _address(self._mem)
+        if not lib.faf_ffi_arena_init(self._state, self._base, nbytes, npools):
+            raise ValueError("arena too small")
+        self.capacity = lib.faf_ffi_region_capacity(self._state)
+        # results can be dropped (and give back their region) on any thread
+        self._lock = threading.Lock()
+
+    def take(self, size):
+        """(writable memoryview of `size` bytes, lease), or None if it
+        doesn't fit or every region is in use. Keep the lease with the
+        memory: dropping it gives the region back."""
+        if size > self.capacity:
+            return None
+        with self._lock:
+            h = lib.faf_ffi_region_acquire(self._state)
+            if not h:
+                return None
+            p = lib.faf_ffi_reserve(self._state, h, size)
+            if not p:
+                lib.faf_ffi_region_release(self._state, h)
+                return None
+        off = p - self._base
+        return memoryview(self._mem)[off:off + size], _Lease(self, h)
+
+    def _release(self, h):
+        with self._lock:
+            lib.faf_ffi_region_release(self._state, h)
+
+
+class _Lease:
+    __slots__ = ("arena", "handle")
+
+    def __init__(self, arena, handle):
+        self.arena, self.handle = arena, handle
+
+    def __del__(self):
+        self.arena._release(self.handle)
+
+
+_arena = None
+_arena_on = hasattr(lib, "faf_ffi_arena_size")
+
+
+def use_arena(arena):
+    """Results from `arena` (an Arena), or from new bytearrays (None)."""
+    global _arena, _arena_on
+    _arena, _arena_on = arena, arena is not None
+
+
+def _default_arena():
+    global _arena
+    if _arena is None and _arena_on:
+        _arena = Arena()
+    return _arena
+
+
 class _Ints:
     """n int64 values starting at element `first` of `owner` (kept alive)."""
 
@@ -116,8 +199,9 @@ def _needle(b):
 class Buffer:
     """Bytes to take views of: a file (mapped), bytes, bytearray, ..."""
 
-    def __init__(self, obj):
+    def __init__(self, obj, lease=None):
         self.obj = obj
+        self.lease = lease  # arena memory: given back when this goes away
         self.nbytes = len(obj)
         self.addr = _address(obj) if self.nbytes else _EMPTY_ADDR
         self.view = memoryview(obj).cast("B")
@@ -314,19 +398,25 @@ class Batch:
 
     @staticmethod
     def _output(out, size):
-        if out is None:
-            return bytearray(size)
-        if not isinstance(out, bytearray):
-            raise TypeError("out must be a bytearray")
-        if len(out) < size:
-            raise ValueError(f"out is {len(out)} bytes, {size} needed")
-        return out
+        """A Buffer of at least `size` writable bytes: `out`, else a region
+        of the arena, else a new bytearray."""
+        if out is not None:
+            if not isinstance(out, bytearray):
+                raise TypeError("out must be a bytearray")
+            if len(out) < size:
+                raise ValueError(f"out is {len(out)} bytes, {size} needed")
+            return Buffer(out)
+        arena = _default_arena()
+        got = arena.take(size) if arena and size else None
+        if got:
+            return Buffer(got[0], lease=got[1])
+        return Buffer(bytearray(size))
 
     def _into_new(self, fill, out):
         total = self.total()
         dst, offsets = self._output(out, total), _zeros("q", self.n + 1)
-        fill(_address(dst) if total else _EMPTY_ADDR, _address(offsets))
-        return Batch._from_offsets(Buffer(dst), offsets, 0, self.n)
+        fill(dst.addr, _address(offsets))
+        return Batch._from_offsets(dst, offsets, 0, self.n)
 
     def compact(self, out=None):
         """A copy with the strings end to end (Arrow layout)."""
@@ -346,9 +436,8 @@ class Batch:
             # kernel call, and the same views into the result
             span = self.ends.view[self.n - 1]
             dst = self._output(out, span)
-            lib.faf_batch_ascii_case_range(self.buffer.addr, 0, span, upper,
-                                           _address(dst) if span else _EMPTY_ADDR)
-            return Batch(Buffer(dst), self.starts, self.ends, dense=True)
+            lib.faf_batch_ascii_case_range(self.buffer.addr, 0, span, upper, dst.addr)
+            return Batch(dst, self.starts, self.ends, dense=True)
         lo = c_int64()
         span = lib.faf_batch_span(self.starts.addr, self.ends.addr, self.n,
                                   ctypes.byref(lo))
@@ -360,14 +449,13 @@ class Batch:
         # dense views (e.g. the lines of a file): one pass over the range they
         # cover, and the same views into the result
         dst = self._output(out, span)
-        addr = _address(dst) if span else _EMPTY_ADDR
         if lo.value == 0:
-            lib.faf_batch_ascii_case_span(*self._args(), upper, addr, None, None)
-            return Batch(Buffer(dst), self.starts, self.ends, self.dense)
+            lib.faf_batch_ascii_case_span(*self._args(), upper, dst.addr, None, None)
+            return Batch(dst, self.starts, self.ends, self.dense)
         starts, ends = _zeros("q", self.n), _zeros("q", self.n)
-        lib.faf_batch_ascii_case_span(*self._args(), upper, addr,
+        lib.faf_batch_ascii_case_span(*self._args(), upper, dst.addr,
                                       _address(starts), _address(ends))
-        return Batch(Buffer(dst), _Ints(starts, 0, self.n), _Ints(ends, 0, self.n))
+        return Batch(dst, _Ints(starts, 0, self.n), _Ints(ends, 0, self.n))
 
     def lower(self, out=None, inplace=False):
         """ASCII lower case. inplace=True changes the strings' own bytes
@@ -384,7 +472,8 @@ class Batch:
         is a memoryview of them."""
         sep, m = _needle(sep)
         size = self.total() + m * max(self.n - 1, 0)
-        dst = self._output(out, size)
+        # the result is the caller's to keep: a bytearray, not arena memory
+        dst = bytearray(size) if out is None else self._output(out, size).obj
         lib.faf_batch_join(*self._args(), sep, m, _address(dst) if size else _EMPTY_ADDR)
         return dst if out is None else memoryview(dst)[:size]
 
@@ -393,7 +482,10 @@ class Batch:
     def to_arrow(self):
         """A pyarrow large_binary array (copies unless already compact)."""
         import pyarrow as pa
-        c = self if self._is_compact() else self.compact()
+        # arena memory is reused once this batch is gone, and pyarrow could
+        # keep it longer: copy into a bytearray the array owns
+        c = self if self._is_compact() else \
+            self.compact(out=bytearray(self.total()))
         off = pa.py_buffer(c.starts.owner)
         data = pa.py_buffer(c.buffer.obj)
         return pa.Array.from_buffers(pa.large_binary(), c.n, [None, off, data],
