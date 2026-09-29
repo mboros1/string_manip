@@ -19,6 +19,7 @@ entries:
     faf_string_strsplit (noflash)
     faf_string_view (noflash)
     faf_string_ring (noflash)
+    faf_batch (noflash)
     faf_kernels_ref (noflash)
     faf_kernels_simd (noflash)
     faf_kernels_swar (noflash)
@@ -26,3 +27,4 @@ entries:
     bench_faf_string (noflash)
     bench_common (noflash)
     bench_alloc (noflash)
+    bench_batch (noflash)
