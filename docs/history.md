@@ -13,6 +13,60 @@ machines and method, but no JSON record to rerun against.
 Machines: Apple M1 Max (NEON), ESP32 (Xtensa LX6, 240 MHz), ESP32-S3 (Xtensa
 LX7 with the PIE vector extension, 240 MHz).
 
+## 0. Design (09-27, before the code)
+
+The allocator was designed in a conversation about arena allocators, before
+any of the commits below; the code then followed it closely.
+
+**The starting point** was the library as it had been left a year earlier,
+with a Claude Code review listing 20 issues. Pools were one static array; a
+pool was "free" when its bump offset was 0, so `next_pool()` could hand the
+same pool out twice, and with all pools in use returned a used one. Nothing was
+bounds-checked (writes ran into the next pool), copies weren't reliably NUL
+terminated (tests passed only because static memory starts zeroed), a reset
+left old pointers looking valid, `concat` ignored its second string, and split
+relied on consecutive allocations being adjacent.
+
+**The model: three layers that never share state.**
+1. *Backing memory*: where regions come from (the static pools).
+2. *Region lifetime*: who owns a region and whether a pointer into it is still
+   valid (acquire/release, generations).
+3. *Allocation within a region*: a bump cursor, alignment, contiguous spans.
+
+String operations are clients of layer 3 only. Almost every issue in the review
+was two layers bleeding into each other: "offset == 0 means free" merged
+ownership into the cursor; `concat` reached into the pool arrays directly.
+
+**Decisions that came out of it**, all in `f8b675b`:
+- Explicit `faf_region_acquire` / `faf_region_release`, failing with
+  `FAF_REGION_NONE` when every pool is taken, instead of inferring ownership.
+- **Generation checks** rather than compile-time lifetimes: C can't see
+  lifetimes in types (Cyclone and Rust can), but a per-region generation that
+  changes on release catches use-after-release for a load, a compare and a
+  branch.
+- A bounds-checked `faf_reserve(region, n)` that returns a contiguous span or
+  fails without moving the cursor; copy, concat and split are built on it.
+- `faf_string` as a 16-byte start/end *value* held by the caller, so only the
+  bytes live in the region, and one span for split's array. Views and owned
+  strings are the same type; the difference is only whether the bytes are in
+  a region.
+- One owner per region, so allocation inside it never needs synchronization;
+  only acquire/release would need atomics, chosen at build time rather than by
+  a runtime flag on the hot path. (Not built yet: the library is
+  single-threaded today.)
+- Compile-time strategies without macro soup: logic in an ordinary
+  `static inline` core, policies as small functions, thin wrappers per variant
+  (the pattern the SIMD kernels' `scan_*` functions and match strategies use).
+- Regions suit work whose lifetimes follow control flow (per record, per
+  parse, per request); data with event-driven lifetimes needs handles or
+  compaction. That is why the churn benchmark compacts live strings into a
+  fresh region when one fills.
+
+**Left for later:** allocation across pools (chaining regions), and a
+ring-buffer region where old data is overwritten and handles detect it with a
+monotonic 64-bit write position (valid while `offset >= write_pos -
+capacity`). The ring is `faf_ring`, still not started.
+
 ## 1. Foundations (09-27)
 
 **Test framework** (`32c9a3e`, `57db2bf`, `95d80f6`, `9eb8029`). After one
