@@ -43,9 +43,11 @@ From [bench/RESULTS.md](bench/RESULTS.md) (recorded, reproducible runs):
   emits a hardware loop decided a 19% difference on the S3. Writing whole
   kernels in assembly fixed it: every S3 kernel is now faster than portable C
   on both short and long inputs.
-
-[docs/history.md](docs/history.md) tells the whole story, including what was
-tried and thrown away.
+- **Clean API for FFI**: Easy and (mostly) stable native foreign function
+  interface makes creating bindings in any programming language straightforward.
+- **Historic documentation**: available at [docs/history.md](docs/history.md),
+  best effort documentation of what was tried, what worked, what didn't,
+  and the thought process behind it.
 
 ## Quick start
 
