@@ -61,6 +61,9 @@ make check_freestanding
 # Run the tests with small pools (2 x 1 KB), like a microcontroller build
 make check_small
 
+# Run the tests without arenas over caller memory (FAF_ARENAS=0)
+make check_no_arenas
+
 # Run the tests on an ESP32 over serial (needs ESP-IDF, default ~/esp/esp-idf-v6.1)
 make esp32_test                                          # original ESP32
 make esp32_test IDF_TARGET=esp32s3 ESPPORT=/dev/cu.usbmodem101

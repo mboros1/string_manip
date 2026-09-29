@@ -17,7 +17,8 @@
  * 2026-09-29
  * Layer 1 is now a value, faf_arena: the static storage is the default arena,
  * and others can be laid over caller memory. Handles carry their arena, so
- * layers 2 and 3 are unchanged apart from reading sizes from it.
+ * layers 2 and 3 are unchanged apart from reading sizes from it. Built with
+ * FAF_ARENAS=0 there is only the default arena, and its sizes are constants.
  */
 
 /* ---- Layer 1: backing memory ---- */
@@ -33,17 +34,46 @@ typedef struct faf_pool_state pool_state;
 
 static FAF_POOL_ATTR faf_slot storage[STORAGE_SLOTS];
 static pool_state default_pools[FAF_NPOOLS];
-static faf_arena default_arena = {.slots = storage,
-                                  .pools = default_pools,
-                                  .pool_slots = FAF_POOL_SLOTS,
-                                  .npools = FAF_NPOOLS};
+#define DEFAULT_ARENA_INIT                                                     \
+  {.slots = storage,                                                           \
+   .pools = default_pools,                                                     \
+   .pool_slots = FAF_POOL_SLOTS,                                               \
+   .npools = FAF_NPOOLS}
 
+// With FAF_ARENAS off, every handle refers to the default arena, and the
+// arena is const: the compiler folds its sizes to the build-time constants,
+// so the code below compiles as if it were written against them.
+#if FAF_ARENAS
+static faf_arena default_arena = DEFAULT_ARENA_INIT;
+#define ARENA(r) ((r).arena)
+#define HAS_ARENA(r) ((r).arena != NULL)
+#define REGION(a, i, g) ((faf_region){.arena = (a), .pool = (i), .gen = (g)})
 faf_arena *faf_arena_default(void) { return &default_arena; }
+#else
+static const faf_arena default_arena = DEFAULT_ARENA_INIT;
+#define ARENA(r) (&default_arena)
+#define HAS_ARENA(r) true
+#define REGION(a, i, g) ((faf_region){.pool = (i), .gen = (g)})
+#endif
 
 static inline faf_slot *pool_base(const faf_arena *a, uint16_t pool) {
   return a->slots + (size_t)pool * a->pool_slots;
 }
 
+static bool arena_contains(const faf_arena *a, const void *p, size_t n) {
+  if (!a->slots)
+    return false;
+  uintptr_t lo = (uintptr_t)a->slots;
+  uintptr_t hi = lo + (size_t)a->npools * a->pool_slots * FAF_SLOT_BYTES;
+  uintptr_t q = (uintptr_t)p;
+  return q >= lo && q <= hi && n <= hi - q;
+}
+
+bool faf_mem_contains(const void *p, size_t n) {
+  return arena_contains(&default_arena, p, n);
+}
+
+#if FAF_ARENAS
 // Offset that aligns `p` up to `align` (a power of two).
 static inline size_t align_pad(uintptr_t p, size_t align) {
   return (size_t)(-p & (align - 1));
@@ -93,63 +123,62 @@ bool faf_arena_init(faf_arena *a, void *buf, size_t nbytes, size_t npools) {
 }
 
 bool faf_arena_contains(const faf_arena *a, const void *p, size_t n) {
-  if (!a->slots)
-    return false;
-  uintptr_t lo = (uintptr_t)a->slots;
-  uintptr_t hi = lo + (size_t)a->npools * a->pool_slots * FAF_SLOT_BYTES;
-  uintptr_t q = (uintptr_t)p;
-  return q >= lo && q <= hi && n <= hi - q;
+  return arena_contains(a, p, n);
 }
-
-bool faf_mem_contains(const void *p, size_t n) {
-  return faf_arena_contains(&default_arena, p, n);
-}
+#endif // FAF_ARENAS
 
 /* ---- Layer 2: region lifetime ---- */
 
-faf_region faf_arena_acquire(faf_arena *a) {
+static inline faf_region acquire_in(const faf_arena *a) {
   pool_state *pools = a->pools;
   uint16_t n = a->npools;
   for (uint16_t i = 0; i < n; ++i) {
     if (!pools[i].in_use) {
       pools[i].in_use = true;
       pools[i].cursor = 0;
-      return (faf_region){.arena = a, .pool = i, .gen = pools[i].gen};
+      return REGION((faf_arena *)a, i, pools[i].gen);
     }
   }
   return FAF_REGION_NONE;
 }
 
-faf_region faf_region_acquire(void) { return faf_arena_acquire(&default_arena); }
+#if FAF_ARENAS
+faf_region faf_arena_acquire(faf_arena *a) { return acquire_in(a); }
+#endif
+
+faf_region faf_region_acquire(void) { return acquire_in(&default_arena); }
 
 bool faf_region_valid(faf_region r) {
-  return r.arena && r.pool < r.arena->npools && r.arena->pools[r.pool].in_use &&
-         r.arena->pools[r.pool].gen == r.gen;
+  if (!HAS_ARENA(r))
+    return false;
+  const faf_arena *a = ARENA(r);
+  return r.pool < a->npools && a->pools[r.pool].in_use &&
+         a->pools[r.pool].gen == r.gen;
 }
 
 void faf_region_release(faf_region r) {
   if (!faf_region_valid(r))
     return;
-  pool_state *ps = &r.arena->pools[r.pool];
+  pool_state *ps = &ARENA(r)->pools[r.pool];
 #ifdef FAF_DEBUG
   // poison, so reads through stale strings stand out
-  faf_memset(pool_base(r.arena, r.pool), 0xDD, ps->cursor * FAF_SLOT_BYTES);
+  faf_memset(pool_base(ARENA(r), r.pool), 0xDD, ps->cursor * FAF_SLOT_BYTES);
 #endif
   ps->gen++;
   ps->in_use = false;
 }
 
 size_t faf_region_capacity(faf_region r) {
-  return faf_region_valid(r) ? r.arena->pool_slots : 0;
+  return faf_region_valid(r) ? ARENA(r)->pool_slots : 0;
 }
 
 size_t faf_region_used(faf_region r) {
-  return faf_region_valid(r) ? r.arena->pools[r.pool].cursor : 0;
+  return faf_region_valid(r) ? ARENA(r)->pools[r.pool].cursor : 0;
 }
 
 size_t faf_region_remaining(faf_region r) {
   return faf_region_valid(r)
-             ? r.arena->pool_slots - r.arena->pools[r.pool].cursor
+             ? ARENA(r)->pool_slots - ARENA(r)->pools[r.pool].cursor
              : 0;
 }
 
@@ -173,7 +202,7 @@ static inline size_t bump_local(size_t *cursor, size_t n, size_t cap) {
 static inline faf_span reserve_core(faf_region r, size_t slots, bump_fn bump) {
   if (!faf_region_valid(r))
     return FAF_SPAN_NONE;
-  faf_arena *a = r.arena;
+  const faf_arena *a = ARENA(r);
   size_t off = bump(&a->pools[r.pool].cursor, slots, a->pool_slots);
   if (off == SIZE_MAX)
     return FAF_SPAN_NONE;
@@ -191,7 +220,7 @@ FAF_DEFINE_RESERVE(faf_reserve, bump_local)
 bool faf_reserve_extend(faf_region r, faf_span *sp, size_t more) {
   if (!faf_region_valid(r) || !sp->ptr)
     return false;
-  faf_arena *a = r.arena;
+  const faf_arena *a = ARENA(r);
   pool_state *ps = &a->pools[r.pool];
   // only the most recent reservation can grow, and only into free space
   if (sp->ptr + sp->slots != pool_base(a, r.pool) + ps->cursor)
@@ -205,7 +234,7 @@ bool faf_reserve_extend(faf_region r, faf_span *sp, size_t more) {
 void faf_reserve_shrink(faf_region r, faf_span *sp, size_t slots) {
   if (!faf_region_valid(r) || !sp->ptr || slots >= sp->slots)
     return;
-  faf_arena *a = r.arena;
+  const faf_arena *a = ARENA(r);
   pool_state *ps = &a->pools[r.pool];
   if (sp->ptr + sp->slots == pool_base(a, r.pool) + ps->cursor)
     ps->cursor -= sp->slots - slots; // most recent: give the tail back

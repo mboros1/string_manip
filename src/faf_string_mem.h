@@ -15,7 +15,10 @@
 //
 // There is a default arena in static storage (faf_region_acquire), sized at
 // build time. Any number of other arenas can be laid over memory the caller
-// provides (faf_arena_init), sized at run time.
+// provides (faf_arena_init), sized at run time, unless the library is built
+// with FAF_ARENAS=0: then there is only the default arena, region handles
+// are 4 bytes instead of 16, and pool sizes are compile-time constants, which
+// in-order cores notice (see docs/memory.md).
 //
 // Not thread-safe: an arena and its regions belong to one thread at a time.
 // Arenas share nothing, so threads that each use their own never contend.
@@ -63,6 +66,10 @@ typedef struct {
   _Alignas(FAF_SLOT_BYTES) unsigned char bytes[FAF_SLOT_BYTES];
 } faf_slot;
 
+#ifndef FAF_ARENAS
+#define FAF_ARENAS 1
+#endif
+
 struct faf_pool_state; // private to faf_string_mem.c
 
 // A set of pools over one block of memory. The fields are private: set them up
@@ -79,12 +86,18 @@ typedef struct {
 // acquire time, so a handle used after release is detected instead of
 // silently aliasing.
 typedef struct {
+#if FAF_ARENAS
   faf_arena *arena;
+#endif
   uint16_t pool;
   uint16_t gen;
 } faf_region;
 
+#if FAF_ARENAS
 #define FAF_REGION_NONE ((faf_region){.arena = NULL, .pool = UINT16_MAX, .gen = 0})
+#else
+#define FAF_REGION_NONE ((faf_region){.pool = UINT16_MAX, .gen = 0})
+#endif
 
 // A contiguous run of reserved slots.
 typedef struct {
@@ -94,6 +107,7 @@ typedef struct {
 
 #define FAF_SPAN_NONE ((faf_span){.ptr = NULL, .slots = 0})
 
+#if FAF_ARENAS
 // Bytes of memory an arena of `npools` pools of `pool_slots` slots needs,
 // including its bookkeeping and alignment slack; 0 if that overflows.
 size_t faf_arena_bytes(size_t npools, size_t pool_slots);
@@ -113,6 +127,7 @@ faf_arena *faf_arena_default(void);
 
 // Claim a free pool of `a`. Returns FAF_REGION_NONE when every pool is in use.
 faf_region faf_arena_acquire(faf_arena *a);
+#endif // FAF_ARENAS
 
 // Claim a free pool of the default arena.
 faf_region faf_region_acquire(void);
@@ -238,7 +253,9 @@ static inline void *faf_memset(void *dst, int c, size_t n) {
 
 // True if [p, p + n) lies inside the pools of `a`, i.e. is owned by some
 // region of it. faf_mem_contains asks the same of the default arena.
+#if FAF_ARENAS
 bool faf_arena_contains(const faf_arena *a, const void *p, size_t n);
+#endif
 bool faf_mem_contains(const void *p, size_t n);
 
 #endif // FAF_STRING_MEM_H

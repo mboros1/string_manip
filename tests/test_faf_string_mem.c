@@ -216,6 +216,7 @@ static void test_copy_out_of_space(void) {
   faf_region_release(r);
 }
 
+#if FAF_ARENAS
 /* ---- Arenas over caller memory ---- */
 
 // Room for small arenas, with a canary past the end to catch overruns.
@@ -358,6 +359,8 @@ static void test_arena_bounds(void) {
     faf_region_release(r[i]);
 }
 
+#endif // FAF_ARENAS
+
 // Test case definitions
 static test_case_t string_mem_tests[] = {
     {"acquire", test_acquire},
@@ -371,11 +374,13 @@ static test_case_t string_mem_tests[] = {
     {"copy_nul_terminated", test_copy_nul_terminated},
     {"copy_from_region", test_copy_from_region},
     {"copy_out_of_space", test_copy_out_of_space},
+#if FAF_ARENAS
     {"arena_init", test_arena_init},
     {"arena_init_rejects", test_arena_init_rejects},
     {"arena_regions", test_arena_regions},
     {"arena_independent", test_arena_independent},
     {"arena_bounds", test_arena_bounds},
+#endif
 };
 
 // Setup and teardown functions
