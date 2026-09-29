@@ -432,8 +432,9 @@ int main(int argc, char **argv) {
   printf("\n%sfaf_string benchmarks%s\n", BOLD, RESET);
   printf("%sbackend %s, best of %d runs, fastest in each group in green%s\n",
          DIM, FAF_BACKEND_NAME, RUNS, RESET);
-  printf("%s%d pools x %d slots of %d bytes, %d input lines%s\n", DIM,
-         FAF_NPOOLS, FAF_POOL_SLOTS, FAF_SLOT_BYTES, NLINES, RESET);
+  printf("%s%d pools x %d slots of %d bytes, %d input lines, arenas %s%s\n",
+         DIM, FAF_NPOOLS, FAF_POOL_SLOTS, FAF_SLOT_BYTES, NLINES,
+         FAF_ARENAS ? "on" : "off", RESET);
 
   for (size_t g = 0; g < NGROUPS; ++g)
     if (!any || selected[g])

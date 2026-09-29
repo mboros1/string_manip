@@ -80,6 +80,9 @@ def parse_log(path):
         if m:
             meta.update(pools=int(m.group(1)), slots=int(m.group(2)),
                         slot_bytes=int(m.group(3)), lines=int(m.group(4)))
+            a = re.search(r"arenas (on|off)", line)  # absent before 839a925
+            if a:
+                meta["arenas"] = a.group(1)
             continue
         if line.startswith("== "):
             section, group = line.strip("= ").strip(), ""
@@ -184,7 +187,8 @@ def cmd_compare(args):
     for label, run in (("A", a), ("B", b)):
         m = run["meta"]
         print(f"{label}: {m['machine']} {m['commit']}{' (dirty)' if m['dirty'] else ''}"
-              f"  {m['date']}  backend {m.get('backend')}  {m['subject']}")
+              f"  {m['date']}  backend {m.get('backend')}"
+              f"{', arenas ' + m['arenas'] if 'arenas' in m else ''}  {m['subject']}")
     brows = {key(r): r for r in b["rows"]}
     counts = {"faster": 0, "slower": 0, "~": 0}
     section = None
@@ -273,7 +277,9 @@ def cmd_report(args):
                     v = key_of(r, metric)
                     vals.append("" if v is None else f"{v:,.1f}" if v < 100
                                 else f"{v:,.0f}")
-                out.append(f"| {run} | {m.get('backend', '')} | " + " | ".join(vals) + " |")
+                backend = m.get("backend", "") + (
+                    ", arenas off" if m.get("arenas") == "off" else "")
+                out.append(f"| {run} | {backend} | " + " | ".join(vals) + " |")
             out.append("")
     with open(REPORT, "w") as f:
         f.write("\n".join(out))

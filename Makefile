@@ -149,9 +149,11 @@ check_no_arenas:
 IDF_PATH ?= $(HOME)/esp/esp-idf-v6.1
 IDF_TARGET ?= esp32
 ESPPORT ?=
+# Extra compile definitions for the board apps, e.g. ESP32_DEFINES=FAF_ARENAS=0
+ESP32_DEFINES ?=
 ESP32_RUN = bash -c '. "$(IDF_PATH)/export.sh" >/dev/null && \
 	python tools/esp32_run.py --target $(IDF_TARGET) \
-		$(if $(ESPPORT),--port $(ESPPORT)) "$$@"' esp32_run
+		$(if $(ESPPORT),--port $(ESPPORT)) --defines="$(ESP32_DEFINES)" "$$@"' esp32_run
 esp32_test:
 	@$(ESP32_RUN) --app=tests
 
@@ -160,7 +162,7 @@ esp32_bench:
 
 esp32_bench_record: esp32_bench
 	@python3 tools/bench_track.py record obj/bench-$(IDF_TARGET).log \
-		--cmd "make esp32_bench_record IDF_TARGET=$(IDF_TARGET)$(if $(BENCH_GROUPS), BENCH_GROUPS=\"$(BENCH_GROUPS)\")"
+		--cmd "make esp32_bench_record IDF_TARGET=$(IDF_TARGET)$(if $(BENCH_GROUPS), BENCH_GROUPS=\"$(BENCH_GROUPS)\")$(if $(ESP32_DEFINES), ESP32_DEFINES=\"$(ESP32_DEFINES)\")"
 	@python3 tools/bench_track.py report
 
 # Built freestanding, the library may import only memcpy, memset, memmove and
