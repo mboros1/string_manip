@@ -4,7 +4,7 @@
 by tuning basic building blocks like memory allocation and kernel operations, applied
 to one of the most basic data structures in computer science, strings.
 
-Currently has optimized builds for Apple Silicon and ESP32 architectures, including
+Currently has optimized builds for Apple Silicon, x86_64 with SSE2, and ESP32 architectures, including
 both the simpler RISC-V architecture and more advanced features available in the
 XTensa architecture that have SIMD-like behavior.
 
