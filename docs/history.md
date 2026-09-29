@@ -366,6 +366,51 @@ per allocation, nothing for code that doesn't allocate. So arenas stay on by
 default everywhere, the board apps included, and `FAF_ARENAS=0` is opt-in for
 firmware where one task does all the string work.
 
+## 9. Batches for bindings, and a Python example (09-29)
+
+Goal: a binding in any language should be a tiny shim. That decided the
+design before any code: the loops over many strings live in C, behind an API
+of out-of-line functions taking only pointers and integers, with nothing
+that depends on build options (`faf_region` is 16 or 4 bytes depending on
+`FAF_ARENAS`, so it can't cross an FFI). Python's ctypes was chosen for the
+example because loading a library and declaring functions is how almost every
+language does FFI, and the example needs only the standard library, so it
+runs anywhere ctypes does.
+
+**`faf_batch`** (`21948ae`): Arrow's offsets layout was the first plan, but
+it can't hold the result of a split (string i must end where i + 1 begins,
+and separators sit between lines). So a batch is `starts[]` and `ends[]`
+into one buffer: `faf_string`'s pair, as offsets. An Arrow array is still a
+batch without copying (`starts = offsets`, `ends = offsets + 1`), and filter
+and take only make new views. 17 functions, each the per-string function in a
+loop; tested against reference implementations written in the test, with
+planted bugs (7 of 8 caught; the survivor, `FAF_NPOS` mapped to -1, is the
+same value either way).
+
+**On the boards.** The new test's static buffers linked on the original
+ESP32 once shrunk, but then FreeRTOS couldn't allocate its idle task at
+startup: static data comes out of the same internal RAM. The buffers are now
+allocated per test (`e14f0c2`). The batch benchmark then crashed on the S3
+with `StoreProhibited`: its 44 KB malloc failed, because the kernels group had
+been leaking 44 KB of line copies all along (`1bb9d06`). Measured
+(`425ce68`): on the S3 and M1 the batch split is 1.25x / 1.45x faster than a
+`next_token` loop (64 separators per scan), but on the original ESP32 it is
+1.38x slower, the SWAR `find_bytes` not paying off there; and hashing costs
+~12 us per 110-byte line on both boards (64-bit multiplies in software on a
+32-bit core).
+
+**Python** (`95af983`, results in `examples/python/RESULTS.md`): searches,
+counts and filters are 4-52x faster than plain Python and up to 56x faster
+than pyarrow; a 529 MB grep-lower-write pipeline runs in 0.30 s vs 1.52 s
+(pyarrow) and 2.03 s (Python). Lower casing loses to pyarrow 4-30x: the
+kernel is the library's slowest (10.7 GB/s vs ~30 GB/s for pyarrow's), it is
+called per string rather than once over the buffer, and the shim allocates a
+new zero-filled output each call. Batches pay off from about 100 strings per
+call; ingesting a Python list costs 3.5-6x pyarrow's. Two measurement traps
+on the way: Python caches the hash of a `bytes` object, so hashing had to be
+timed on fresh copies; and pyarrow starts its compute engine on first use
+(~0.2 s), so every pipeline variant warms up on a tiny file first.
+
 ## Lessons
 
 - **On in-order cores, codegen details are the performance.** A taken branch,

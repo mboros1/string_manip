@@ -8,3 +8,4 @@ a.out
 a.out.*
 .env
 test-explorer.log
+__pycache__/
