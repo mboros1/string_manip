@@ -292,24 +292,83 @@ size_t faf_k_mismatch_icase(const char *a, const char *b, size_t n) {
 }
 
 FAF_NO_BUILTIN
+// ASCII case of the 8 bytes of x, a word at a time: a byte is a letter to
+// convert if its high bit is clear and it is in [lo, hi]. Adding to the low 7
+// bits can't carry into the next byte, and sets the high bit exactly when the
+// byte is >= lo (resp. > hi).
+// Forced inline: as a call it made the kernel save registers on every entry.
+__attribute__((always_inline)) static inline uint64_t
+case_word(uint64_t x, uint64_t lo_add, uint64_t hi_add) {
+  const uint64_t high = 0x8080808080808080ull;
+  uint64_t low7 = x & ~high;
+  uint64_t in_range = ((low7 + lo_add) ^ (low7 + hi_add)) & ~x & high;
+  return x ^ (in_range >> 2); // 0x80 >> 2 == 0x20, the case bit
+}
+
+// 2026-09-29: 64 bytes per iteration in four independent vectors, with the
+// tail outside the loop (it used to be 16 at a time with the tail test in
+// the loop: 10.7 GB/s on the M1), and strings under 16 bytes as overlapping
+// words instead of a byte at a time.
 void faf_k_ascii_case(char *dst, const char *src, size_t n, bool upper) {
   if (n < 16) {
-    faf_ref_ascii_case(dst, src, n, upper);
+    const uint64_t ones = 0x0101010101010101ull;
+    uint64_t lo_add = ones * (0x80 - (upper ? 'a' : 'A'));
+    uint64_t hi_add = ones * (0x7F - (upper ? 'z' : 'Z'));
+    if (n >= 8) {
+      // two overlapping words cover 8..15 bytes; both loaded before either
+      // store, so dst may equal src
+      uint64_t a, b;
+      __builtin_memcpy(&a, src, 8);
+      __builtin_memcpy(&b, src + n - 8, 8);
+      a = case_word(a, lo_add, hi_add);
+      b = case_word(b, lo_add, hi_add);
+      __builtin_memcpy(dst, &a, 8);
+      __builtin_memcpy(dst + n - 8, &b, 8);
+    } else if (n >= 4) {
+      uint32_t a, b;
+      __builtin_memcpy(&a, src, 4);
+      __builtin_memcpy(&b, src + n - 4, 4);
+      a = (uint32_t)case_word(a, lo_add, hi_add);
+      b = (uint32_t)case_word(b, lo_add, hi_add);
+      __builtin_memcpy(dst, &a, 4);
+      __builtin_memcpy(dst + n - 4, &b, 4);
+    } else {
+      unsigned char lo = upper ? 'a' : 'A';
+      for (size_t i = 0; i < n; ++i) {
+        unsigned char c = (unsigned char)src[i];
+        dst[i] = (char)((unsigned char)(c - lo) < 26 ? c ^ 0x20 : c);
+      }
+    }
     return;
   }
   v128 lo = v_splat(upper ? 'a' : 'A');
   v128 delta = v_splat(upper ? (uint8_t)-0x20 : 0x20);
   v128 span = v_splat(25);
-  size_t i = 0;
-  for (;; i += 16) {
-    if (i + 16 > n)
-      i = n - 16; // overlapping last block; converting twice is harmless
-    v128 v = v_loadu(src + i);
-    v128 hit = v_le_u8(v_sub(v, lo), span);
-    v_storeu(dst + i, v_add(v, v_and(hit, delta)));
-    if (i + 16 == n)
-      break;
+#define CASE(v) v_add((v), v_and(v_le_u8(v_sub((v), lo), span), delta))
+  // the last 16 bytes, loaded first: if dst == src the loop would overwrite
+  // them, and converting them again later is harmless either way
+  v128 last = v_loadu(src + n - 16);
+  if (n <= 32) { // two overlapping blocks, no loop
+    v128 first = v_loadu(src);
+    v_storeu(dst, CASE(first));
+    v_storeu(dst + n - 16, CASE(last));
+    return;
   }
+  size_t i = 0;
+  for (; i + 64 <= n; i += 64) {
+    v128 a = v_loadu(src + i), b = v_loadu(src + i + 16);
+    v128 c = v_loadu(src + i + 32), d = v_loadu(src + i + 48);
+    v_storeu(dst + i, CASE(a));
+    v_storeu(dst + i + 16, CASE(b));
+    v_storeu(dst + i + 32, CASE(c));
+    v_storeu(dst + i + 48, CASE(d));
+  }
+  for (; i + 16 <= n; i += 16) {
+    v128 a = v_loadu(src + i);
+    v_storeu(dst + i, CASE(a));
+  }
+  v_storeu(dst + n - 16, CASE(last)); // overlaps the loop's last block
+#undef CASE
 }
 
 FAF_NO_BUILTIN

@@ -396,26 +396,49 @@ size_t faf_k_mismatch_icase(const char *a, const char *b, size_t n) {
 /* ---- Transforms ---- */
 
 FAF_NO_BUILTIN
+// Case conversion of every lane with the range constants precomputed:
+// (t + lo_add) and (t + hi_add) differ in the high bit exactly for lanes in
+// [lo, hi]. Taking the constants as arguments keeps the choice between upper
+// and lower out of the loop.
+__attribute__((always_inline)) static inline word case_lanes(word x, word lo_add,
+                                                         word hi_add) {
+  word t = x & LOWS7;
+  return x ^ ((((t + lo_add) ^ (t + hi_add)) & ~x & HIGHS) >> 2);
+}
+
+// 2026-09-29: the constants chosen once, two words per iteration. It used to
+// call to_case(x, upper) in the loop, which on Xtensa computed both cases and
+// branched between them, reloading two constants every word: ~25 cycles per
+// word, 38 MB/s on the ESP32.
 void faf_k_ascii_case(char *dst, const char *src, size_t n, bool upper) {
   size_t i = 0;
-  unsigned char lo = upper ? 'a' : 'A', hi = upper ? 'z' : 'Z';
+  unsigned char lo = upper ? 'a' : 'A';
+  word lo_add = bcast((unsigned char)(0x80 - lo));
+  word hi_add = bcast((unsigned char)(0x7F - (lo + 25)));
   for (; i < n && !aligned(src + i); ++i) {
     unsigned char c = (unsigned char)src[i];
-    dst[i] = (char)(c >= lo && c <= hi ? c ^ 0x20 : c);
+    dst[i] = (char)((unsigned char)(c - lo) < 26 ? c ^ 0x20 : c);
   }
   size_t words = (n - i) / W;
   if (aligned(dst + i)) {
-    for (; words; --words, i += W)
-      *(word_alias *)(void *)(dst + i) = to_case(load(src + i), upper);
+    for (; words >= 2; words -= 2, i += 2 * W) {
+      word x = load(src + i), y = load(src + i + W);
+      *(word_alias *)(void *)(dst + i) = case_lanes(x, lo_add, hi_add);
+      *(word_alias *)(void *)(dst + i + W) = case_lanes(y, lo_add, hi_add);
+    }
+    if (words) {
+      *(word_alias *)(void *)(dst + i) = case_lanes(load(src + i), lo_add, hi_add);
+      i += W;
+    }
   } else {
     for (; words; --words, i += W) {
-      word x = to_case(load(src + i), upper);
+      word x = case_lanes(load(src + i), lo_add, hi_add);
       __builtin_memcpy(dst + i, &x, W); // unaligned store
     }
   }
   for (; i < n; ++i) {
     unsigned char c = (unsigned char)src[i];
-    dst[i] = (char)(c >= lo && c <= hi ? c ^ 0x20 : c);
+    dst[i] = (char)((unsigned char)(c - lo) < 26 ? c ^ 0x20 : c);
   }
 }
 
