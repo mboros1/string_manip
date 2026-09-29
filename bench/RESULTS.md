@@ -66,6 +66,7 @@ esp32 rev 301, 240 MHz, ESP-IDF v6.1
 | 2026-09-29 `cf5a35fb4` ESP32_DEFINES: extra definitions for the board apps; bench h | swar | 7,738 | 63,958 | 4,460 | 5,815 | 5,102 | 5,275 | 7,443 | 720,792 | 110,548 |
 | 2026-09-29 `cf5a35fb4` ESP32_DEFINES: extra definitions for the board apps; bench h | swar, arenas off | 7,578 | 64,012 | 4,358 | 5,810 | 5,092 | 5,170 | 7,290 | 703,672 | 111,206 |
 | 2026-09-29 `1bb9d06b6` bench: free the kernels group's line copies (leaked 44 KB on | swar | 7,740 | 70,610 | 4,460 | 5,815 | 5,102 | 5,275 | 7,443 | 720,792 | 110,548 |
+| 2026-09-29 `ab244f556` esp32 bench: faf_batch and bench_batch in IRAM like the rest | swar | 7,738 | 63,438 | 4,460 | 5,815 | 5,105 | 5,275 | 7,442 | 720,770 | 110,546 |
 
 **Kernels, MB/s (higher is better)**
 
@@ -78,6 +79,7 @@ esp32 rev 301, 240 MHz, ESP-IDF v6.1
 | 2026-09-29 `cf5a35fb4` ESP32_DEFINES: extra definitions for the board apps; bench h | swar | 101 | 56.4 | 119 | 59.9 | 19.2 | 38.3 |
 | 2026-09-29 `cf5a35fb4` ESP32_DEFINES: extra definitions for the board apps; bench h | swar, arenas off | 101 | 56.3 | 119 | 59.9 | 19.2 | 38.3 |
 | 2026-09-29 `1bb9d06b6` bench: free the kernels group's line copies (leaked 44 KB on | swar | 101 | 56.3 | 119 | 59.9 | 19.2 | 38.3 |
+| 2026-09-29 `ab244f556` esp32 bench: faf_batch and bench_batch in IRAM like the rest | swar | 101 | 56.4 | 119 | 59.9 | 19.2 | 38.3 |
 
 ## esp32s3
 
@@ -104,6 +106,7 @@ esp32s3 rev 2, 240 MHz, ESP-IDF v6.1
 | 2026-09-29 `cf5a35fb4` ESP32_DEFINES: extra definitions for the board apps; bench h | pie | 6,015 | 45,828 | 2,968 | 4,380 | 3,462 | 3,780 | 6,681 | 603,748 | 102,246 |
 | 2026-09-29 `cf5a35fb4` ESP32_DEFINES: extra definitions for the board apps; bench h | pie, arenas off | 5,885 | 45,938 | 2,880 | 4,375 | 3,455 | 3,692 | 6,557 | 586,738 | 101,954 |
 | 2026-09-29 `1bb9d06b6` bench: free the kernels group's line copies (leaked 44 KB on | pie | 6,015 | 45,828 | 2,962 | 4,380 | 3,462 | 3,780 | 6,680 | 603,746 | 102,242 |
+| 2026-09-29 `ab244f556` esp32 bench: faf_batch and bench_batch in IRAM like the rest | pie | 6,015 | 45,828 | 2,968 | 4,380 | 3,465 | 3,782 | 6,681 | 603,750 | 102,246 |
 
 **Kernels, MB/s (higher is better)**
 
@@ -126,3 +129,4 @@ esp32s3 rev 2, 240 MHz, ESP-IDF v6.1
 | 2026-09-29 `cf5a35fb4` ESP32_DEFINES: extra definitions for the board apps; bench h | pie | 724 | 963 | 716 | 411 | 21.8 | 39.9 |
 | 2026-09-29 `cf5a35fb4` ESP32_DEFINES: extra definitions for the board apps; bench h | pie, arenas off | 725 | 963 | 715 | 411 | 21.8 | 39.9 |
 | 2026-09-29 `1bb9d06b6` bench: free the kernels group's line copies (leaked 44 KB on | pie | 724 | 964 | 716 | 411 | 21.8 | 39.9 |
+| 2026-09-29 `ab244f556` esp32 bench: faf_batch and bench_batch in IRAM like the rest | pie | 724 | 964 | 715 | 411 | 21.8 | 39.9 |
