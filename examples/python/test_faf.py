@@ -203,7 +203,7 @@ def test_case_modes():
 
 
 def test_arena():
-    saved, faf._arena = faf._arena, faf.Arena(pool_bytes=4096, npools=4)
+    saved, faf._arenas = faf._arenas, (faf.Arena(pool_bytes=4096, npools=4),)
     try:
         lines = faf.Buffer.from_bytes(b"Hello\nWORLD\nAbc").split()  # region 1
         r = lines.lower()                                             # region 2
@@ -251,7 +251,29 @@ def test_arena():
         again = lines.lower()  # held: a temporary would be collected at once
         assert faf.lib.faf_batch_data(again.handle) == addr
     finally:
-        faf._arena = saved
+        faf._arenas = saved
+
+
+def test_two_arenas():
+    # small results in the first arena, a big one in the second
+    small, big = faf.Arena(4096, 3), faf.Arena(64 << 10, 1)
+    saved, faf._arenas = faf._arenas, (small, big)
+    try:
+        lines = faf.Buffer.from_bytes(b"a\nb").split()
+        wide = faf.Buffer.from_bytes(b"x" * 20000).split()
+        in_small = lambda b: faf.lib.faf_batch_data(b.handle) - faf._address(small._mem)
+        low = lines.upper()
+        assert 0 <= in_small(low) < len(small._mem), "small result not in the small arena"
+        w = wide.upper()   # 20000 bytes: only the big arena holds it
+        assert list(w) == [b"X" * 20000]
+        assert not 0 <= in_small(w) < len(small._mem)
+        try:  # small arena full (lines, wide, low), big one's region taken
+            wide.lower()
+            raise AssertionError("a second big result fit")
+        except MemoryError:
+            pass
+    finally:
+        faf._arenas = saved
 
 
 def test_arrow():

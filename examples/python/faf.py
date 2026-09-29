@@ -46,6 +46,7 @@ def _declare(lib):
         "faf_arena_size": (c_size_t, []),
         "faf_arena_bytes": (c_size_t, [c_size_t, c_size_t]),
         "faf_arena_init": (ctypes.c_bool, [P, P, c_size_t, c_size_t]),
+        "faf_arena_fini": (None, [P]),
         "faf_batch_split": (B, [P, P, c_size_t, c_char]),
         "faf_batch_from_offsets": (B, [P, P, P, c_size_t]),
         "faf_batch_free": (None, [B]),
@@ -99,7 +100,7 @@ class Arena:
     memory; pages a result touched stay mapped for the next one. If the OS
     won't reserve that much, pools are halved until it does."""
 
-    def __init__(self, pool_bytes=1 << 30, npools=64):
+    def __init__(self, pool_bytes, npools):
         while True:
             nbytes = lib.faf_arena_bytes(npools, pool_bytes)
             try:
@@ -113,31 +114,45 @@ class Arena:
         self._state = ctypes.create_string_buffer(lib.faf_arena_size())
         if not lib.faf_arena_init(self._state, _address(self._mem), nbytes, npools):
             raise MemoryError("faf arena: no free arena table entry")
-        # batches are made and freed (by garbage collection) on any thread
-        self.lock = threading.Lock()
 
-    def _make(self, fn, *args):
-        with self.lock:
-            h = fn(self._state, *args)
-        if not h:
-            raise MemoryError("faf: no free region, or the result is larger "
-                              f"than one ({self.pool_bytes} bytes)")
-        return h
-
-    def _free(self, h):
-        with self.lock:
-            lib.faf_batch_free(h)
+    def __del__(self):
+        # batches keep their arena, so none is left when this runs
+        if getattr(self, "_state", None) is not None:
+            lib.faf_arena_fini(self._state)
 
 
-_arena = None
+# Batches are made and freed (by garbage collection) on any thread; one lock
+# covers the arenas' bookkeeping.
+_lock = threading.Lock()
+_arenas = None
 
 
-def arena():
-    """The arena batches come from (made on first use)."""
-    global _arena
-    if _arena is None:
-        _arena = Arena()
-    return _arena
+def arenas():
+    """The arenas batches come from, tried in order (made on first use):
+    many small regions for the common case, a few large ones for big
+    results."""
+    global _arenas
+    if _arenas is None:
+        _arenas = (Arena(1 << 20, 4096), Arena(2 << 30, 32))
+    return _arenas
+
+
+def _make(fn, *args):
+    """A new batch (handle, arena) from the first arena with a free region it
+    fits in."""
+    tried = arenas()
+    for a in tried:
+        with _lock:
+            h = fn(a._state, *args)
+        if h:
+            return h, a
+    raise MemoryError("faf: no free region, or the result is larger than one "
+                      f"({tried[-1].pool_bytes} bytes)")
+
+
+def _free(h):
+    with _lock:
+        lib.faf_batch_free(h)
 
 
 def _needle(b):
@@ -179,8 +194,7 @@ class Buffer:
         if len(sep) != 1:
             raise ValueError("split separator must be one byte")
         n = self.nbytes if _len is None else _len
-        a = arena()
-        return Batch(a._make(lib.faf_batch_split, self.addr, n, sep), a, self)
+        return Batch(*_make(lib.faf_batch_split, self.addr, n, sep), keep=self)
 
     def lines(self):
         """Like split(b"\\n"), without the empty piece after a final newline
@@ -195,14 +209,15 @@ class Batch:
     """A batch in a faf arena: n views into one byte buffer. `keep` holds the
     Python objects its views point into, so they outlive it."""
 
-    def __init__(self, handle, arena_, keep=None):
-        self.handle, self.arena, self.keep = handle, arena_, keep
+    def __init__(self, handle, arena, keep=None):
+        # the arena too: its memory holds this batch
+        self.handle, self.arena, self.keep = handle, arena, keep
         self.n = lib.faf_batch_len(handle)
 
     def __del__(self):
         if getattr(self, "handle", 0):
             try:
-                self.arena._free(self.handle)
+                _free(self.handle)
             except Exception:  # interpreter shutdown: the library may be gone
                 pass
             self.handle = 0
@@ -213,10 +228,9 @@ class Batch:
     def from_offsets(cls, data, offsets, n, first=0):
         """Arrow layout: string i is data[offsets[first + i] : ...[first + i + 1]].
         Nothing is copied; the batch keeps `data` and `offsets` alive."""
-        a = arena()
         d = _address(data) if len(data) else None
         o = _address(offsets) + 8 * first
-        return cls(a._make(lib.faf_batch_from_offsets, d, o, n), a, (data, offsets))
+        return cls(*_make(lib.faf_batch_from_offsets, d, o, n), keep=(data, offsets))
 
     @classmethod
     def from_list(cls, items):
@@ -318,8 +332,7 @@ class Batch:
     # lower/upper/compact own their bytes.
 
     def _new(self, fn, *args, keep=None):
-        a = arena()
-        return Batch(a._make(fn, self.handle, *args), a, keep)
+        return Batch(*_make(fn, self.handle, *args), keep=keep)
 
     def filter(self, mask):
         """The strings where mask is non-zero (mask: array('B'), bytes, ...)."""

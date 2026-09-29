@@ -456,8 +456,9 @@ def section_crossover(args):
         for op in ("contains", "lower", "lengths"):
             f, p = faf_ops()[op], py_ops()[op]
             reps = max(1, 20_000 // n)
-            tf, _ = best(lambda: [f(batch, NEEDLE) for _ in range(reps)], runs)
-            tp, _ = best(lambda: [p(lines, NEEDLE) for _ in range(reps)], runs)
+            # results are dropped as they come, as a loop over batches would
+            tf, _ = best(lambda: [f(batch, NEEDLE) and None for _ in range(reps)], runs)
+            tp, _ = best(lambda: [p(lines, NEEDLE) and None for _ in range(reps)], runs)
             per = lambda t: t * 1e9 / (n * reps)  # noqa: E731
             row += [f"{fmt_ns(per(tf))} / {fmt_ns(per(tp))}", ratio(tp, tf)]
         rows.append(row)
