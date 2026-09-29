@@ -4,17 +4,17 @@
 CPython 3.12.10, pyarrow 19.0.1. Best of 5 (faf, pyarrow) or 3 (plain Python),
 every variant's results checked against the others. Plain Python works on
 `bytes`, with the same ASCII semantics as faf. Rerun the script at that commit
-for the full output.
+for the full output. The lower case rows and the cold table are from
+`2297f37` (results share their input's views), the rest from `dc1a72e`.
 
 ## Summary
 
 - **Scans** (`contains`, `find`, `count`, filtering) are 4-54x faster than
   plain Python and 2-56x faster than pyarrow; the pyarrow gap grows with line
   length.
-- **Lower case** is 15-27x faster than plain Python, and even with pyarrow
-  from 128 B lines up. Below that pyarrow is faster (0.2x at 8 B, 0.6x at
-  32 B): a faf result copies its views (16 bytes a string), where pyarrow's
-  shares the input's offsets.
+- **Lower case** is 15-95x faster than plain Python and even with pyarrow at
+  every length (0.9-1.0x): a result shares its input's views, as pyarrow's
+  shares its offsets.
 - **A 529 MB grep-lower-write pipeline** takes 0.31 s, against 1.50 s for
   pyarrow and 2.0 s for plain Python, with half their peak memory.
 - **Batches pay off from ~100 strings per call**; below that the per-call cost
@@ -30,7 +30,7 @@ for the full output.
 | count ',' | 4.3 (19x / 2.4x) | 6.0 (15x / 7.3x) | 8.5 (19x / 28x) | 17.5 (20x / 57x) | 172 (13x / 46x) |
 | startswith | 1.6 (43x / 0.6x) | 3.9 (19x / 1.4x) | 4.2 (18x / 1.4x) | 13.8 (6.0x / 1.0x) | 11.1 (8.0x / 1.2x) |
 | lengths | 1.2 (12x / 0.2x) | 1.1 (14x / 0.2x) | 0.7 (22x / 0.5x) | 0.8 (54x / 0.7x) | 1.8 (21x / 1.3x) |
-| lower | 1.1 (27x / 0.2x) | 1.8 (23x / 0.6x) | 4.8 (19x / 0.9x) | 17.2 (18x / 1.0x) | 133 (15x / 1.0x) |
+| lower | 0.3 (95x / 0.9x) | 1.1 (38x / 1.0x) | 4.2 (21x / 1.0x) | 16.5 (19x / 1.0x) | 131 (15x / 1.0x) |
 | hash | 4.9 (9.0x / -) | 8.8 (6.1x / -) | 29.0 (3.2x / -) | 132 (1.9x / -) | 1,371 (1.2x / -) |
 | filter contains | 4.9 (46x / 2.2x) | 14.8 (15x / 3.6x) | 30.9 (8.9x / 8.0x) | 98.8 (5.6x / 10x) | 675 (4.3x / 12x) |
 
@@ -44,10 +44,10 @@ caches its hash. Other inputs, 128 B lines unless noted:
 | short keys (8-24 B): contains | 8.7 | 28x | 2.5x |
 | short keys: startswith | 6.4 | 12x | 0.8x |
 | short keys: hash | 15.6 | 3.9x | - |
-| short keys: lower | 1.3 | 29x | 0.4x |
+| short keys: lower | 0.5 | 76x | 0.9x |
 | UTF-8 heavy text: contains | 43.4 | 6.6x | 3.4x |
 | UTF-8 heavy text: count ',' | 8.4 | 19x | 28x |
-| UTF-8 heavy text: lower | 4.8 | 19x | 0.9x |
+| UTF-8 heavy text: lower | 4.2 | 21x | 1.0x |
 
 ## Pipelines: keep lines with ERROR, lower case them, write them
 
@@ -83,11 +83,10 @@ pages, which the OS can drop; streaming Python holds one line at a time.
 
 | lines | faf | pyarrow, built from a list | pyarrow, fresh memory |
 |---|---:|---:|---:|
-| 8 B | 4.5 ns (5,690 faults) | 1.2 (701) | 1.4 (1,823) |
-| 128 B | 22.1 (2,301) | 16.3 (102) | 18.3 (2,033) |
-| 4096 B | 472 (2,056) | 245 (95) | 561 (2,050) |
+| 8 B | 1.4 ns (2,050 faults) | 1.1 (701) | 1.4 (1,823) |
+| 128 B | 19.0 (2,047) | 13.1 (96) | 17.4 (2,035) |
+| 4096 B | 552 (2,048) | 250 (95) | 553 (2,050) |
 
 Median of 5 processes, page faults during the call in brackets. Built from a
 list, pyarrow's `lower` reuses pages its own builder freed, so it isn't cold;
-with fresh memory on both sides faf is even or faster from 128 B, and slower
-at 8 B, where its copied views are twice the size of the strings.
+with fresh memory on both sides the two are even.
