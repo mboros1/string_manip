@@ -295,6 +295,44 @@ Keeping recent lines (store one, read the one from 32 steps earlier), M1:
 ring 13.7 ns per step in a fixed 4 KB, `strdup` + `free` 85.8 ns (6.3x
 slower) and 7.5 KB at peak.
 
+## 8. Arenas over caller memory (09-29)
+
+Motivated by bindings: a Python example shim (and any other language's) needs
+memory it controls, sized for the job, one set per thread. The static pools
+were global, capped at build time, and not thread-safe. Thread-local pools
+were considered and rejected: they patch the global state rather than remove
+it, and `_Thread_local` is not something freestanding and ESP32 builds can
+count on.
+
+Instead, layer 1 of the allocator (section 0) became a value (`5a3bd81`):
+`faf_arena` holds the slot storage, the pool states and the sizes, and
+`faf_arena_init` lays one over any buffer (bookkeeping at the start, the rest
+split evenly into pools, aligned to the slot size). The static pools are the
+default arena, so `faf_region_acquire` and every build option behave as
+before. Region handles carry their arena (4 -> 16 bytes, still passed in
+registers), which kept every allocating function's signature unchanged:
+layers 2 and 3 only read sizes from the arena instead of constants.
+
+Tested with planted bugs, one at a time, on a direct compile: a pool one slot
+too large, unaligned slots, unaligned pool states, a missing NULL-arena check,
+an off-by-one bound, the default arena's size used for another arena, and a
+generation that isn't bumped. The first round of this passed every mutant,
+because `make` here (GNU make 3.81) compares timestamps to the second: an
+edit within a second of the restore didn't rebuild `faf_string_mem.o` or
+`libfaf.a`, and the "clean" run afterwards was testing a mutant. Rebuilt
+directly, all but two failed; the survivors were misalignment, which the M1
+tolerates. Slot alignment is a documented promise, so the test now asserts
+it; pool-state alignment is private, and `-fsanitize=alignment` catches it.
+
+Cost, M1 (recorded run against `73e3bdb`): record processing 100.5 -> 100.2
+ns, small copies unchanged. Acquire + release got faster with 0 or 6 of 12
+pools held (6.6 -> 5.6 ns) and slower with 11 held (6.8 -> 7.5 ns): the scan
+no longer has a constant trip count. Copies of 1 KB were 4% slower in both
+the interleaved and the recorded runs (19.9 -> 20.8 ns), within the Mac's
+noise but consistent. Rows the change can't affect (malloc, libc `strlen`,
+the `ref` kernels) moved by 3-7% in the same run, which sets the noise floor.
+Not yet measured on the boards.
+
 ## Lessons
 
 - **On in-order cores, codegen details are the performance.** A taken branch,
@@ -305,6 +343,8 @@ slower) and 7.5 KB at peak.
   within the spread once old and new builds were run interleaved.
 - **Read the platform's own code.** The ROM's `strlen` showed the right
   instruction for the job (`bnone`), which the SWAR habit had missed.
+- **Check that the test can fail.** A mutant that passes may not have been
+  built: with second-resolution timestamps, `make` can skip the rebuild.
 - **Keep an oracle.** Every backend is checked against the `ref` kernels at
   every length and alignment; it caught each assembly bug before a benchmark
   could.
