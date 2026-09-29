@@ -17,12 +17,19 @@
 #define DST_BYTES 2048
 #define SPLIT_BYTES 1024
 #define ARENA_BYTES (32 * 1024)
-#define NPOOLS 8
+#define NPOOLS 2
 static int64_t *starts, *ends, *out64, *ref64;
 static uint8_t *out8;
 static uint64_t *outh;
 static char *dst, *split_buf, *arena_buf;
 static faf_arena *A;
+static faf_region R; // each test's region (batch_setup)
+
+// A new, empty region: for tests that make many batches.
+static void fresh(void) {
+  faf_region_release(R);
+  R = faf_arena_acquire(A);
+}
 
 // Deterministic xorshift.
 static uint32_t rng_state = 2463534242u;
@@ -70,7 +77,7 @@ static int64_t ref_count(const char *s, size_t n, const char *sub, size_t m) {
 }
 
 // b must hold exactly the strings `data`[st[i], en[i]) for i < n.
-static bool same_strings(faf_batch b, const char *data, const int64_t *st,
+static bool same_strings(const faf_batch *b, const char *data, const int64_t *st,
                          const int64_t *en, size_t n) {
   if (faf_batch_len(b) != n)
     return false;
@@ -84,8 +91,9 @@ static bool same_strings(faf_batch b, const char *data, const int64_t *st,
 }
 
 static void check_split(const char *s, size_t len, char sep, const char *what) {
+  fresh();
   size_t want = ref_split(s, len, sep, out64, ref64);
-  faf_batch b = faf_batch_split(A, s, len, sep);
+  faf_batch *b = faf_batch_split(R, s, len, sep);
   ASSERT_TRUE(b != 0, what);
   ASSERT_INT_EQ((int)want, (int)faf_batch_len(b), what);
   ASSERT_TRUE(faf_batch_data(b) == s, "split copied the data");
@@ -94,7 +102,6 @@ static void check_split(const char *s, size_t len, char sep, const char *what) {
     ASSERT_INT_EQ((int)out64[i], (int)bs[i], what);
     ASSERT_INT_EQ((int)ref64[i], (int)be[i], what);
   }
-  faf_batch_free(b);
 }
 
 static void test_split_cases(void) {
@@ -137,7 +144,7 @@ static void test_search(void) {
   const char *needles[] = {"", "e", "rr", "error", "ERROR", "errors", "zz",
                            "Error: disk FULL; error again, ERROR x; errors!"};
   size_t n = make_views();
-  faf_batch b = faf_batch_from_views(A, words, starts, ends, n);
+  faf_batch *b = faf_batch_from_views(R, words, starts, ends, n);
   ASSERT_TRUE(b != 0, "from_views failed");
   for (size_t k = 0; k < sizeof needles / sizeof needles[0]; ++k) {
     const char *nd = needles[k];
@@ -160,12 +167,11 @@ static void test_search(void) {
     }
     ASSERT_INT_EQ((int)want_yes, (int)yes, "contains count");
   }
-  faf_batch_free(b);
 }
 
 static void test_prefix_suffix_eq(void) {
   size_t n = make_views();
-  faf_batch b = faf_batch_from_views(A, words, starts, ends, n);
+  faf_batch *b = faf_batch_from_views(R, words, starts, ends, n);
   const char *probes[] = {"", "E", "Error", "rror", "s", "errors",
                           "error again, ERROR x; errors"};
   for (size_t k = 0; k < sizeof probes / sizeof probes[0]; ++k) {
@@ -195,17 +201,16 @@ static void test_prefix_suffix_eq(void) {
       ASSERT_INT_EQ(want, out8[i], "eq_icase");
     }
   }
-  faf_batch_free(b);
 }
 
 static void test_select_take(void) {
   size_t n = make_views();
-  faf_batch b = faf_batch_from_views(A, words, starts, ends, n);
+  faf_batch *b = faf_batch_from_views(R, words, starts, ends, n);
   uint8_t mask[MAXN];
   size_t want = 0;
   for (size_t i = 0; i < n; ++i)
     want += (mask[i] = (uint8_t)(rng() % 3 == 0 ? 0 : rng() % 5 + 1)) != 0;
-  faf_batch s = faf_batch_select(A, b, mask);
+  faf_batch *s = faf_batch_select(R, b, mask);
   ASSERT_INT_EQ((int)want, (int)faf_batch_len(s), "select count");
   ASSERT_TRUE(faf_batch_data(s) == words, "select copied bytes");
   const int64_t *ss = faf_batch_starts(s), *se = faf_batch_ends(s);
@@ -216,18 +221,15 @@ static void test_select_take(void) {
     }
 
   int64_t idx[5] = {3, 0, 3, 63, 42};
-  faf_batch t = faf_batch_take(A, b, idx, 5);
+  faf_batch *t = faf_batch_take(R, b, idx, 5);
   const int64_t *ts = faf_batch_starts(t), *te = faf_batch_ends(t);
   for (size_t i = 0; t && i < 5; ++i)
     ASSERT_TRUE(ts[i] == starts[idx[i]] && te[i] == ends[idx[i]], "take view");
-  faf_batch_free(t);
-  faf_batch_free(s);
-  faf_batch_free(b);
 }
 
 static void test_lengths_hash(void) {
   size_t n = make_views();
-  faf_batch b = faf_batch_from_views(A, words, starts, ends, n);
+  faf_batch *b = faf_batch_from_views(R, words, starts, ends, n);
   int64_t total = 0;
   faf_batch_lengths(b, out64);
   for (size_t i = 0; i < n; ++i) {
@@ -240,14 +242,13 @@ static void test_lengths_hash(void) {
     faf_string s = faf_string_init_n(words + starts[i], (size_t)(ends[i] - starts[i]));
     ASSERT_TRUE(outh[i] == faf_string_hash_seed(s, 7), "hash");
   }
-  faf_batch_free(b);
 }
 
 // Every way lower / upper case can be taken: the results must match.
-static void check_case(faf_batch b, const char *data, const int64_t *st,
+static void check_case(const faf_batch *b, const char *data, const int64_t *st,
                        const int64_t *en, size_t n, const char *what) {
   for (int up = 0; up <= 1; ++up) {
-    faf_batch r = faf_batch_ascii_case(A, b, up);
+    faf_batch *r = faf_batch_ascii_case(R, b, up);
     ASSERT_TRUE(r != 0, what);
     ASSERT_INT_EQ((int)n, (int)faf_batch_len(r), what);
     const char *rd = faf_batch_data(r);
@@ -263,7 +264,6 @@ static void check_case(faf_batch b, const char *data, const int64_t *st,
         ASSERT_TRUE(rd[rs[i] + j] == (up ? upper(c) : lower(c)), what);
       }
     }
-    faf_batch_free(r);
   }
 }
 
@@ -271,51 +271,46 @@ static void test_case_paths(void) {
   // dense from a split: one pass over the range
   const char *text = "Abc,DEF,,gH,\xc3\x89t\xc3\xa9";
   size_t len = strlen(text);
-  faf_batch s = faf_batch_split(A, text, len, ',');
+  faf_batch *s = faf_batch_split(R, text, len, ',');
   size_t n = ref_split(text, len, ',', starts, ends);
   check_case(s, text, starts, ends, n, "split");
   // views from 0: the result shares them; from elsewhere: its own
-  faf_batch r = faf_batch_ascii_case(A, s, 0);
+  faf_batch *r = faf_batch_ascii_case(R, s, 0);
   ASSERT_TRUE(faf_batch_starts(r) == faf_batch_starts(s) &&
                   faf_batch_ends(r) == faf_batch_ends(s),
               "views from 0 were copied");
-  faf_batch_free(r);
   // dense Arrow offsets that don't start at 0
   int64_t offs[4] = {4, 7, 7, 12};
-  faf_batch o = faf_batch_from_offsets(A, text, offs, 3);
+  faf_batch *o = faf_batch_from_offsets(R, text, offs, 3);
   int64_t os[3] = {4, 7, 7}, oe[3] = {7, 7, 12};
   check_case(o, text, os, oe, 3, "offsets from 4");
-  r = faf_batch_ascii_case(A, o, 0);
+  r = faf_batch_ascii_case(R, o, 0);
   ASSERT_TRUE(faf_batch_starts(r) != faf_batch_starts(o), "shifted views shared");
-  faf_batch_free(r);
   // scattered but covering most of the range, and sparse
   n = make_views();
-  faf_batch v = faf_batch_from_views(A, words, starts, ends, n);
+  faf_batch *v = faf_batch_from_views(R, words, starts, ends, n);
   check_case(v, words, starts, ends, n, "scattered views");
   int64_t ss[2] = {0, 40}, se[2] = {2, 42};
-  faf_batch sp = faf_batch_from_views(A, words, ss, se, 2);
+  faf_batch *sp = faf_batch_from_views(R, words, ss, se, 2);
   check_case(sp, words, ss, se, 2, "sparse views");
-  faf_batch_free(s), faf_batch_free(o), faf_batch_free(v), faf_batch_free(sp);
   // two short strings further apart than a region holds: only packing them
   // (not one pass over their range) fits
   size_t far = ARENA_BYTES / NPOOLS + 100;
   char *wide = malloc(far + 2);
   memset(wide, 'Q', far + 2);
   int64_t ws[2] = {0, (int64_t)far}, we[2] = {2, (int64_t)far + 2};
-  faf_batch w = faf_batch_from_views(A, wide, ws, we, 2);
+  faf_batch *w = faf_batch_from_views(R, wide, ws, we, 2);
   check_case(w, wide, ws, we, 2, "views wider than a region");
-  faf_batch_free(w);
   free(wide);
-  faf_batch e = faf_batch_from_views(A, words, ss, se, 0);
+  faf_batch *e = faf_batch_from_views(R, words, ss, se, 0);
   check_case(e, words, ss, se, 0, "empty batch");
-  faf_batch_free(e);
 }
 
 static void test_compact_join(void) {
   size_t n = make_views();
-  faf_batch b = faf_batch_from_views(A, words, starts, ends, n);
+  faf_batch *b = faf_batch_from_views(R, words, starts, ends, n);
   int64_t total = faf_batch_total(b);
-  faf_batch c = faf_batch_compact(A, b);
+  faf_batch *c = faf_batch_compact(R, b);
   ASSERT_TRUE(same_strings(c, words, starts, ends, n), "compact strings");
   const int64_t *cs = faf_batch_starts(c), *ce = faf_batch_ends(c);
   ASSERT_TRUE(c && cs[0] == 0 && ce[n - 1] == total, "compact is end to end");
@@ -336,10 +331,8 @@ static void test_compact_join(void) {
     ASSERT_TRUE(memcmp(dst + at, words + starts[i], len) == 0, "join bytes");
     at += (int64_t)len;
   }
-  faf_batch_free(c), faf_batch_free(b);
-  faf_batch none = faf_batch_from_views(A, words, starts, ends, 0);
+  faf_batch *none = faf_batch_from_views(R, words, starts, ends, 0);
   ASSERT_INT_EQ(0, (int)faf_batch_join(none, "\n", 1, dst), "join of nothing");
-  faf_batch_free(none);
 }
 
 static void test_inplace(void) {
@@ -352,7 +345,7 @@ static void test_inplace(void) {
   for (size_t i = 0; i < n; ++i)
     for (int64_t j = vs[i]; j < ve[i]; ++j)
       covered[j] = 1;
-  faf_batch b = faf_batch_from_views(A, buf, vs, ve, n);
+  faf_batch *b = faf_batch_from_views(R, buf, vs, ve, n);
   faf_batch_ascii_case_inplace(b, 1);
   int outside = 0;
   for (size_t j = 0; j < len; ++j) {
@@ -360,70 +353,42 @@ static void test_inplace(void) {
     outside += !covered[j];
   }
   ASSERT_TRUE(outside > 0, "test needs bytes outside the views");
-  faf_batch_free(b);
-}
-
-static void test_stale_and_foreign(void) {
-  faf_batch b = faf_batch_split(A, "a,b", 3, ',');
-  ASSERT_INT_EQ(2, (int)faf_batch_len(b), "split");
-  faf_batch_free(b);
-  // freed, zero, and a plain region that isn't a batch: all rejected
-  faf_region plain = faf_arena_acquire(A);
-  faf_reserve(plain, 8);
-  faf_batch bad[] = {b, 0, (faf_batch)plain};
-  for (size_t k = 0; k < 3; ++k) {
-    ASSERT_INT_EQ(0, (int)faf_batch_len(bad[k]), "stale len");
-    ASSERT_TRUE(faf_batch_data(bad[k]) == NULL, "stale data");
-    out64[0] = 42;
-    faf_batch_lengths(bad[k], out64);
-    ASSERT_INT_EQ(42, (int)out64[0], "stale batch wrote results");
-    ASSERT_TRUE(faf_batch_ascii_case(A, bad[k], 0) == 0, "stale batch made a result");
-    ASSERT_INT_EQ(0, (int)faf_batch_contains(bad[k], "a", 1, out8), "stale contains");
-  }
-  faf_batch_free((faf_batch)plain); // not a batch: must not release the region
-  ASSERT_TRUE(faf_region_valid(plain), "freeing a non-batch released its region");
-  faf_region_release(plain);
 }
 
 static void test_too_big(void) {
-  // views that don't fit in a region: 0, and no region is left taken
+  // views that don't fit in the region: NULL, and the region is unchanged
   size_t len = ARENA_BYTES; // one separator per byte: 16 bytes of views each
   char *big = malloc(len);
   TEST_REQUIRE(big != NULL, "no memory for the input");
   memset(big, ',', len);
-  ASSERT_TRUE(faf_batch_split(A, big, len, ',') == 0, "oversized split succeeded");
-  faf_region all[NPOOLS];
-  for (int i = 0; i < NPOOLS; ++i)
-    all[i] = faf_arena_acquire(A);
-  ASSERT_TRUE(faf_region_valid(all[NPOOLS - 1]), "a failed split kept its region");
-  for (int i = 0; i < NPOOLS; ++i)
-    faf_region_release(all[i]);
+  size_t used = faf_region_used(R);
+  ASSERT_TRUE(faf_batch_split(R, big, len, ',') == NULL, "oversized split succeeded");
+  ASSERT_INT_EQ((int)used, (int)faf_region_used(R), "a failed split used the region");
   free(big);
 }
 
 static void test_high_bytes(void) {
   // bytes >= 0x80 (UTF-8) are ordinary bytes: searched, never case mapped
   const char *s = "caf\xc3\xa9\n\xc3\x89T\xc3\x89\n\xff\xfe";
-  faf_batch b = faf_batch_split(A, s, strlen(s), '\n');
+  faf_batch *b = faf_batch_split(R, s, strlen(s), '\n');
   ASSERT_INT_EQ(3, (int)faf_batch_len(b), "utf-8 split");
   faf_batch_find(b, "\xc3\xa9", 2, out64);
   ASSERT_TRUE(out64[0] == 3 && out64[1] == -1 && out64[2] == -1, "utf-8 find");
-  faf_batch l = faf_batch_ascii_case(A, b, 0);
+  faf_batch *l = faf_batch_ascii_case(R, b, 0);
   ASSERT_TRUE(memcmp(faf_batch_data(l), "caf\xc3\xa9\n\xc3\x89t\xc3\x89\n\xff\xfe", 14) == 0,
               "lower changed a non-ASCII byte");
-  faf_batch_free(l), faf_batch_free(b);
 }
 
 static void test_null_where_empty(void) {
   // the header promises NULL is fine wherever the length is 0
-  faf_batch e = faf_batch_split(A, NULL, 0, ',');
+  faf_batch *e = faf_batch_split(R, NULL, 0, ',');
   ASSERT_INT_EQ(1, (int)faf_batch_len(e), "empty split is one empty string");
-  faf_batch z = faf_batch_from_offsets(A, NULL, out64, 0); // out64[0]: any
+  faf_batch *z = faf_batch_from_offsets(R, NULL, out64, 0); // out64[0]: any
   const char *s = "abc";
-  faf_batch b = faf_batch_split(A, s, 3, ',');
-  faf_batch all[] = {e, z, b};
+  faf_batch *b = faf_batch_split(R, s, 3, ',');
+  faf_batch *all[] = {e, z, b};
   for (size_t k = 0; k < 3; ++k) {
-    faf_batch x = all[k];
+    faf_batch *x = all[k];
     faf_batch_find(x, NULL, 0, out64);
     faf_batch_count(x, NULL, 0, out64);
     faf_batch_contains(x, NULL, 0, out8);
@@ -431,18 +396,15 @@ static void test_null_where_empty(void) {
     faf_batch_ends_with(x, NULL, 0, out8);
     faf_batch_eq(x, NULL, 0, out8);
     faf_batch_eq_icase(x, NULL, 0, out8);
-    faf_batch r = faf_batch_ascii_case(A, x, 0);
-    faf_batch c = faf_batch_compact(A, x);
+    faf_batch *r = faf_batch_ascii_case(R, x, 0);
+    faf_batch *c = faf_batch_compact(R, x);
     ASSERT_TRUE(r && c, "result of an empty or NULL batch");
-    faf_batch_free(r), faf_batch_free(c);
     faf_batch_join(x, NULL, 0, dst);
   }
   faf_batch_join(z, ",", 1, NULL); // nothing to write
-  faf_batch t = faf_batch_take(A, b, NULL, 0);
-  faf_batch sel = faf_batch_select(A, z, NULL);
+  faf_batch *t = faf_batch_take(R, b, NULL, 0);
+  faf_batch *sel = faf_batch_select(R, z, NULL);
   ASSERT_TRUE(t && sel && faf_batch_len(t) == 0 && faf_batch_len(sel) == 0, "empty take / select");
-  faf_batch_free(t), faf_batch_free(sel);
-  faf_batch_free(e), faf_batch_free(z), faf_batch_free(b);
 }
 
 static void test_shifted_result(void) {
@@ -450,8 +412,8 @@ static void test_shifted_result(void) {
   // operation must read it as the strings it holds
   const char *text = "xxxxAbc,DEF,,gH";
   int64_t offs[5] = {4, 7, 11, 12, 15};
-  faf_batch o = faf_batch_from_offsets(A, text, offs, 4); // Abc ,DEF , ,gH
-  faf_batch r = faf_batch_ascii_case(A, o, 0);
+  faf_batch *o = faf_batch_from_offsets(R, text, offs, 4); // Abc ,DEF , ,gH
+  faf_batch *r = faf_batch_ascii_case(R, o, 0);
   const char *want[4] = {"abc", ",def", ",", ",gh"};
   int64_t st[4], en[4], pos = 0;
   static char flat[32];
@@ -468,16 +430,15 @@ static void test_shifted_result(void) {
   int64_t n = faf_batch_join(r, "|", 1, dst);
   ASSERT_TRUE(n == 14 && memcmp(dst, "abc|,def|,|,gh", 14) == 0, "join");
   uint8_t mask[4] = {0, 1, 0, 1};
-  faf_batch sel = faf_batch_select(A, r, mask);
+  faf_batch *sel = faf_batch_select(R, r, mask);
   int64_t ss[2] = {st[1], st[3]}, se[2] = {en[1], en[3]};
   ASSERT_TRUE(same_strings(sel, flat, ss, se, 2), "select");
-  faf_batch up = faf_batch_ascii_case(A, sel, 1); // a result of a result
+  faf_batch *up = faf_batch_ascii_case(R, sel, 1); // a result of a result
   const int64_t *us = faf_batch_starts(up);
   ASSERT_TRUE(up && memcmp(faf_batch_data(up) + us[0], ",DEF", 4) == 0,
               "upper of a selection");
   faf_batch_ascii_case_inplace(r, 1); // r's bytes are its own region's
   ASSERT_TRUE(memcmp(faf_batch_data(r), "ABC,DEF,,GH", 11) == 0, "in place");
-  faf_batch_free(up), faf_batch_free(sel), faf_batch_free(r), faf_batch_free(o);
 }
 
 static test_case_t batch_tests[] = {
@@ -490,7 +451,6 @@ static test_case_t batch_tests[] = {
     {"case_paths", test_case_paths},
     {"compact_join", test_compact_join},
     {"inplace", test_inplace},
-    {"stale_and_foreign", test_stale_and_foreign},
     {"too_big", test_too_big},
     {"high_bytes", test_high_bytes},
     {"null_where_empty", test_null_where_empty},
@@ -509,10 +469,11 @@ static void batch_setup(void) {
   memset(arena_buf, 0xA5, ARENA_BYTES); // results must not rely on zeroed memory
   A = malloc(faf_arena_size());
   faf_arena_init(A, arena_buf, ARENA_BYTES, NPOOLS);
+  R = faf_arena_acquire(A);
 }
 
 static void batch_teardown(void) {
-  faf_arena_fini(A);
+  faf_region_release(R);
   free(starts), free(ends), free(out64), free(ref64), free(out8), free(outh);
   free(dst), free(split_buf), free(arena_buf), free(A);
 }
