@@ -352,8 +352,11 @@ the shim carried layout and strategy logic every binding would repeat. So:
   and picks the lower case strategy, and one `faf_batch_free` releases it.
   Four lower case entry points became one plus in place.
 - **The shim** keeps handles, garbage collection and interop only
-  (`6f00703`): 393 lines, down from 505, over one arena of 64 x 1 GB of
-  address space.
+  (`6f00703`): ~400 lines, down from 505. Each live batch holds a region, so
+  one arena of 64 regions ran out as soon as a loop kept 64 results; batches
+  now come from a small arena (4096 x 1 MB) first and a large one (32 x 2 GB)
+  when they don't fit (`dc1a72e`). A batch keeps its arena alive: without
+  that, a batch outliving its arena freed itself into unmapped memory.
 
 ## Lessons
 ## Lessons

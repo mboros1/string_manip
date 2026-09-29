@@ -28,9 +28,10 @@ with open("errors.log", "wb") as f:
   `array.array`; `faf.to_numpy()` views them without a copy.
 - Bytes cross into Python only on indexing, iteration, `head`, `join` and
   `to_arrow`. `Batch.from_arrow` takes Arrow data without copying it.
-- The arena is one anonymous mapping of 64 regions of 1 GB: address space,
-  not memory, until used. Each live batch holds a region, so one result is at
-  most 1 GB, and `MemoryError` means no region was free.
+- Batches come from two arenas, each an anonymous mapping (address space,
+  not memory, until used): 4096 regions of 1 MB, tried first, and 32 of 2 GB
+  for big results. Each live batch holds a region; `MemoryError` means none
+  was free that fits.
 - Strings are bytes; case functions are ASCII only, like `bytes.lower()`.
   `lower(inplace=True)` works on batches over a `bytearray`.
 
