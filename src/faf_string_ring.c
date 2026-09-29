@@ -3,7 +3,10 @@
 #include "faf_string_mem.h"
 
 bool faf_ring_init(faf_ring *r, char *buf, size_t cap) {
-  bool ok = buf != NULL && cap > 0 && (uint64_t)cap <= UINT32_MAX;
+  bool ok = buf != NULL && cap > 0;
+#if SIZE_MAX > UINT32_MAX // offsets are 32 bits; always true on 32-bit targets
+  ok = ok && cap <= UINT32_MAX;
+#endif
   *r = (faf_ring){.buf = ok ? buf : NULL, .cap = ok ? cap : 0};
   return ok;
 }
