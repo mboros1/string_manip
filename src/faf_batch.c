@@ -159,6 +159,47 @@ void faf_batch_ascii_case(const char *data, const int64_t *starts,
   }
 }
 
+int64_t faf_batch_span(const int64_t *starts, const int64_t *ends, size_t n,
+                       int64_t *lo) {
+  if (n == 0) {
+    *lo = 0;
+    return 0;
+  }
+  int64_t min = starts[0], max = ends[0];
+  for (size_t i = 1; i < n; ++i) {
+    min = starts[i] < min ? starts[i] : min;
+    max = ends[i] > max ? ends[i] : max;
+  }
+  *lo = min;
+  return max - min;
+}
+
+void faf_batch_ascii_case_span(const char *data, const int64_t *starts,
+                               const int64_t *ends, size_t n, int upper,
+                               char *dst, int64_t *out_starts,
+                               int64_t *out_ends) {
+  int64_t lo;
+  int64_t len = faf_batch_span(starts, ends, n, &lo);
+  faf_k_ascii_case(dst, data + lo, (size_t)len, upper != 0);
+  if (out_starts && out_ends)
+    for (size_t i = 0; i < n; ++i) {
+      out_starts[i] = starts[i] - lo;
+      out_ends[i] = ends[i] - lo;
+    }
+}
+
+void faf_batch_ascii_case_range(const char *data, int64_t lo, int64_t len,
+                                int upper, char *dst) {
+  faf_k_ascii_case(dst, data + lo, (size_t)len, upper != 0);
+}
+
+void faf_batch_ascii_case_inplace(char *data, const int64_t *starts,
+                                  const int64_t *ends, size_t n, int upper) {
+  for (size_t i = 0; i < n; ++i)
+    faf_k_ascii_case(data + starts[i], data + starts[i],
+                     (size_t)(ends[i] - starts[i]), upper != 0);
+}
+
 int64_t faf_batch_join(const char *data, const int64_t *starts,
                        const int64_t *ends, size_t n, const char *sep,
                        size_t sep_len, char *dst) {

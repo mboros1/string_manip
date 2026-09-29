@@ -164,6 +164,65 @@ def test_big_split():
     assert list(got.take([0, 9999, 5000])) == [lines[0], lines[9999], lines[5000]]
 
 
+def test_case_modes():
+    data = random_data(200, 60) + b"\n"
+    ref = data.split(b"\n")
+    lines = faf.Buffer.from_bytes(data).split()
+    # dense: one pass over the span, and the views are reused (they start at 0)
+    dense = lines.lower()
+    assert list(dense) == [ascii_lower(s) for s in ref]
+    assert dense.starts is lines.starts, "span mode should reuse views at 0"
+    # dense but not starting at 0
+    tail = lines.take(range(10, len(ref)))
+    assert list(tail.upper()) == [ascii_upper(s) for s in ref[10:]]
+    # sparse: a few strings far apart are packed instead
+    sparse = lines.take([0, len(ref) // 2, len(ref) - 2])
+    got = sparse.lower()
+    assert list(got) == [ascii_lower(ref[i]) for i in (0, len(ref) // 2, len(ref) - 2)]
+    assert got.buffer.nbytes == sparse.total(), "sparse lower should pack"
+
+    # out=: reused, and too small is an error
+    out = bytearray(len(data))
+    a = lines.lower(out=out)
+    assert a.buffer.obj is out and list(a) == [ascii_lower(s) for s in ref]
+    b = lines.upper(out=out)  # same buffer again: `a` now sees upper case
+    assert list(b) == [ascii_upper(s) for s in ref]
+    assert bytes(lines.join(b"|", out=bytearray(len(data) + 5))) == b"|".join(ref)
+    assert list(sparse.compact(out=bytearray(1000))) == list(sparse)
+    for bad, err in ((bytearray(3), ValueError), (b"x" * 10_000, TypeError)):
+        try:
+            lines.lower(out=bad)
+            raise AssertionError("bad out accepted")
+        except err:
+            pass
+
+    # in place: only the strings' own bytes change
+    owned = bytearray(b"Abc,DEF,,gH")
+    b = faf.Buffer(owned).split(b",")
+    kept = b.take([0, 3])
+    assert kept.lower(inplace=True) is kept
+    assert bytes(owned) == b"abc,DEF,,gh", bytes(owned)
+    assert list(b) == [b"abc", b"DEF", b"", b"gh"], "other views see the change"
+    for immutable in (faf.Buffer.from_bytes(b"AB\nCD").split(),):
+        try:
+            immutable.lower(inplace=True)
+            raise AssertionError("inplace on bytes accepted")
+        except TypeError:
+            pass
+    with tempfile.NamedTemporaryFile(delete=False) as f:
+        f.write(b"AB\nCD\n")
+    try:
+        mapped = faf.Buffer.from_file(f.name).lines()
+        try:
+            mapped.lower(inplace=True)
+            raise AssertionError("inplace on a mapped file accepted")
+        except TypeError:
+            pass
+        del mapped
+    finally:
+        os.unlink(f.name)
+
+
 def test_arrow():
     try:
         import pyarrow as pa

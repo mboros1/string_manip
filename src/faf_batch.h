@@ -102,6 +102,35 @@ void faf_batch_ascii_case(const char *data, const int64_t *starts,
                           const int64_t *ends, size_t n, int upper, char *dst,
                           int64_t *dst_offsets);
 
+// ---- Same layout: one pass over the range the views cover ----
+// For batches whose views cover most of their range (the lines of a file):
+// one kernel call instead of one per string, and the views can be reused.
+
+// Length of the range the views cover, [min start, max end), and its start in
+// *lo. 0 (and *lo = 0) for n == 0.
+int64_t faf_batch_span(const int64_t *starts, const int64_t *ends, size_t n,
+                       int64_t *lo);
+
+// ASCII case copy of the whole span into `dst` (faf_batch_span bytes; the
+// bytes between views are copied too, converted), and the views shifted to
+// it: out_starts[i] = starts[i] - lo, same for ends. out_starts / out_ends
+// may be NULL when lo is 0: the input views then describe dst as they are.
+void faf_batch_ascii_case_span(const char *data, const int64_t *starts,
+                               const int64_t *ends, size_t n, int upper,
+                               char *dst, int64_t *out_starts,
+                               int64_t *out_ends);
+
+// ASCII case copy of data[lo, lo + len) into dst: for a caller that knows
+// the span without scanning the views (a split, an Arrow array: views in
+// order, starting at starts[0] and ending at ends[n - 1]).
+void faf_batch_ascii_case_range(const char *data, int64_t lo, int64_t len,
+                                int upper, char *dst);
+
+// Convert the strings in place: only bytes inside views change. Overlapping
+// views are fine (converting twice is the same as once).
+void faf_batch_ascii_case_inplace(char *data, const int64_t *starts,
+                                  const int64_t *ends, size_t n, int upper);
+
 // The strings joined by `sep` (e.g. "\n" to write lines out), into `dst`:
 // faf_batch_total + (n - 1) * sep_len bytes (0 for n == 0). Returns the
 // bytes written.

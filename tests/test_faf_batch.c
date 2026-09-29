@@ -280,6 +280,72 @@ static void test_high_bytes(void) {
               "lower changed a non-ASCII byte");
 }
 
+static void test_span_modes(void) {
+  int64_t lo = -1;
+  ASSERT_INT_EQ(0, (int)faf_batch_span(starts, ends, 0, &lo), "empty span");
+  ASSERT_INT_EQ(0, (int)lo, "empty span start");
+
+  size_t n = make_views(); // random, overlapping, unsorted
+  for (size_t i = 0; i < n; ++i) { // keep the span off 0, so lo matters
+    starts[i] = starts[i] < 5 ? 5 : starts[i];
+    ends[i] = ends[i] < starts[i] ? starts[i] : ends[i];
+  }
+  int64_t min = starts[0], max = ends[0];
+  for (size_t i = 1; i < n; ++i) {
+    min = starts[i] < min ? starts[i] : min;
+    max = ends[i] > max ? ends[i] : max;
+  }
+  int64_t len = faf_batch_span(starts, ends, n, &lo);
+  ASSERT_TRUE(lo == min && len == max - min, "span bounds");
+  ASSERT_TRUE(lo >= 5, "span should start after 0");
+
+  for (int upper = 0; upper <= 1; ++upper) {
+    memset(dst, '#', DST_BYTES);
+    faf_batch_ascii_case_span(words, starts, ends, n, upper, dst, os, oe);
+    ASSERT_TRUE(dst[len] == '#', "span wrote past its length");
+    for (int64_t j = 0; j < len; ++j) {
+      char c = words[lo + j];
+      char want = upper ? (c >= 'a' && c <= 'z' ? c - 32 : c) : lower(c);
+      ASSERT_TRUE(dst[j] == want, "span byte");
+    }
+    for (size_t i = 0; i < n; ++i)
+      ASSERT_TRUE(os[i] == starts[i] - lo && oe[i] == ends[i] - lo, "span views");
+  }
+
+  // lo == 0: views may be reused, NULL outputs are not written
+  size_t m = faf_batch_split(words, strlen(words), ' ', starts, ends, MAXN);
+  ASSERT_INT_EQ(0, (int)starts[0], "split starts at 0");
+  memset(dst, '#', DST_BYTES);
+  faf_batch_ascii_case_span(words, starts, ends, m, 0, dst, NULL, NULL);
+  for (size_t i = 0; i < m; ++i)
+    for (int64_t j = starts[i]; j < ends[i]; ++j)
+      ASSERT_TRUE(dst[j] == lower(words[j]), "span with reused views");
+}
+
+static void test_inplace(void) {
+  // overlapping and unsorted, with gaps: [0,5) [3,9) [20,31) [40,40) [44,46)
+  const int64_t vs[] = {20, 0, 3, 40, 44}, ve[] = {31, 5, 9, 40, 46};
+  size_t n = sizeof vs / sizeof vs[0];
+  memcpy(starts, vs, sizeof vs);
+  memcpy(ends, ve, sizeof ve);
+  size_t len = strlen(words);
+  char *buf = split_buf;
+  memcpy(buf, words, len);
+  uint8_t covered[64] = {0};
+  for (size_t i = 0; i < n; ++i)
+    for (int64_t j = starts[i]; j < ends[i]; ++j)
+      covered[j] = 1;
+  faf_batch_ascii_case_inplace(buf, starts, ends, n, 1);
+  int outside = 0;
+  for (size_t j = 0; j < len; ++j) {
+    char c = words[j];
+    char want = covered[j] ? (c >= 'a' && c <= 'z' ? c - 32 : c) : c;
+    ASSERT_TRUE(buf[j] == want, "in place byte");
+    outside += !covered[j];
+  }
+  ASSERT_TRUE(outside > 0, "test needs bytes outside the views");
+}
+
 static test_case_t batch_tests[] = {
     {"split_cases", test_split_cases},
     {"split_random", test_split_random},
@@ -290,6 +356,8 @@ static test_case_t batch_tests[] = {
     {"lengths_hash", test_lengths_hash},
     {"new_bytes", test_new_bytes},
     {"high_bytes", test_high_bytes},
+    {"span_modes", test_span_modes},
+    {"inplace", test_inplace},
 };
 
 static void batch_setup(void) {

@@ -132,6 +132,13 @@ void bench_batch(void) {
         faf_batch_ascii_case(buf, starts, ends, n, 0, dst, offs);
         sink += (size_t)offs[n]);
   BENCH("faf_k_ascii_case loop", n, loop_lower());
+  // same layout: one kernel call over the range the lines cover
+  BENCH("faf_batch_ascii_case_span", n,
+        faf_batch_ascii_case_span(buf, starts, ends, n, 0, dst, os, oe);
+        sink += (size_t)dst[0]);
+  BENCH("faf_batch_ascii_case_range", n,
+        faf_batch_ascii_case_range(buf, 0, (int64_t)buf_len, 0, dst);
+        sink += (size_t)dst[0]);
 
   // one operation each, with nothing to compare against
   group_begin("count ',' per line", NS_PER_OP);

@@ -53,6 +53,10 @@ def _declare(lib):
         "faf_batch_compact": (None, [P, P, P, c_size_t, P, P]),
         "faf_batch_ascii_case": (None, [P, P, P, c_size_t, c_int, P, P]),
         "faf_batch_join": (c_int64, [P, P, P, c_size_t, P, c_size_t, P]),
+        "faf_batch_span": (c_int64, [P, P, c_size_t, P]),
+        "faf_batch_ascii_case_span": (None, [P, P, P, c_size_t, c_int, P, P, P]),
+        "faf_batch_ascii_case_inplace": (None, [P, P, P, c_size_t, c_int]),
+        "faf_batch_ascii_case_range": (None, [P, c_int64, c_int64, c_int, P]),
     }
     for name in ("contains", "starts_with", "ends_with", "eq", "eq_icase"):
         sig[f"faf_batch_{name}"] = (c_size_t, [P, P, P, c_size_t, P, c_size_t, P])
@@ -140,7 +144,7 @@ class Buffer:
         starts, ends = _zeros("q", n), _zeros("q", n)
         lib.faf_batch_split(self.addr, self.nbytes, sep, _address(starts),
                             _address(ends), n)
-        return Batch(self, _Ints(starts, 0, n), _Ints(ends, 0, n))
+        return Batch(self, _Ints(starts, 0, n), _Ints(ends, 0, n), dense=True)
 
     def lines(self):
         """Like split(b"\\n"), without the empty piece after a final newline
@@ -152,18 +156,24 @@ class Buffer:
 
 
 class Batch:
-    """n views into one Buffer: string i is data[starts[i]:ends[i]]."""
+    """n views into one Buffer: string i is data[starts[i]:ends[i]].
 
-    def __init__(self, buffer, starts, ends):
+    `dense` batches have their views in order with at most a separator
+    between them (made by split, from offsets, or from another dense batch
+    keeping its views): the range they cover is known without scanning."""
+
+    def __init__(self, buffer, starts, ends, dense=False):
         self.buffer, self.starts, self.ends = buffer, starts, ends
         self.n = len(starts.view)
+        self.dense = dense
 
     # -- constructors --
 
     @classmethod
     def _from_offsets(cls, buffer, offsets, first, n):
         # Arrow layout: string i is data[off[i]:off[i + 1]]
-        return cls(buffer, _Ints(offsets, first, n), _Ints(offsets, first + 1, n))
+        return cls(buffer, _Ints(offsets, first, n), _Ints(offsets, first + 1, n),
+                   dense=True)
 
     @classmethod
     def from_list(cls, items):
@@ -213,7 +223,7 @@ class Batch:
 
     def _first(self, m):
         return Batch(self.buffer, _Ints(self.starts.owner, self._pos(self.starts), m),
-                     _Ints(self.ends.owner, self._pos(self.ends), m))
+                     _Ints(self.ends.owner, self._pos(self.ends), m), self.dense)
 
     @staticmethod
     def _pos(ints):
@@ -297,30 +307,86 @@ class Batch:
         return Batch(self.buffer, _Ints(starts, 0, m), _Ints(ends, 0, m))
 
     # -- new bytes --
+    # Each takes `out`: a bytearray to write into instead of a new one (it
+    # must be big enough; a batch returned earlier that used it sees the new
+    # bytes). Reusing one saves allocating, zero filling and first touching
+    # fresh memory on every call, which costs more than the conversion.
 
-    def _into_new(self, fill):
+    @staticmethod
+    def _output(out, size):
+        if out is None:
+            return bytearray(size)
+        if not isinstance(out, bytearray):
+            raise TypeError("out must be a bytearray")
+        if len(out) < size:
+            raise ValueError(f"out is {len(out)} bytes, {size} needed")
+        return out
+
+    def _into_new(self, fill, out):
         total = self.total()
-        dst, offsets = bytearray(total), _zeros("q", self.n + 1)
+        dst, offsets = self._output(out, total), _zeros("q", self.n + 1)
         fill(_address(dst) if total else _EMPTY_ADDR, _address(offsets))
         return Batch._from_offsets(Buffer(dst), offsets, 0, self.n)
 
-    def compact(self):
+    def compact(self, out=None):
         """A copy with the strings end to end (Arrow layout)."""
-        return self._into_new(lambda d, o: lib.faf_batch_compact(*self._args(), d, o))
+        return self._into_new(
+            lambda d, o: lib.faf_batch_compact(*self._args(), d, o), out)
 
-    def lower(self):
-        return self._into_new(lambda d, o: lib.faf_batch_ascii_case(*self._args(), 0, d, o))
+    def _case(self, upper, out, inplace):
+        if inplace:
+            # only for memory the caller owns and may change: bytes are
+            # immutable, and a mapped file would copy each page on write
+            if not isinstance(self.buffer.obj, bytearray):
+                raise TypeError("inplace needs a batch over a bytearray")
+            lib.faf_batch_ascii_case_inplace(*self._args(), upper)
+            return self
+        if self.dense and self.n and self.starts.view[0] == 0:
+            # the range is known, [0, last end): no scan of the views, one
+            # kernel call, and the same views into the result
+            span = self.ends.view[self.n - 1]
+            dst = self._output(out, span)
+            lib.faf_batch_ascii_case_range(self.buffer.addr, 0, span, upper,
+                                           _address(dst) if span else _EMPTY_ADDR)
+            return Batch(Buffer(dst), self.starts, self.ends, dense=True)
+        lo = c_int64()
+        span = lib.faf_batch_span(self.starts.addr, self.ends.addr, self.n,
+                                  ctypes.byref(lo))
+        if span > 2 * self.total():
+            # sparse views (e.g. after a selective filter): convert and pack
+            # just the strings
+            return self._into_new(lambda d, o: lib.faf_batch_ascii_case(
+                *self._args(), upper, d, o), out)
+        # dense views (e.g. the lines of a file): one pass over the range they
+        # cover, and the same views into the result
+        dst = self._output(out, span)
+        addr = _address(dst) if span else _EMPTY_ADDR
+        if lo.value == 0:
+            lib.faf_batch_ascii_case_span(*self._args(), upper, addr, None, None)
+            return Batch(Buffer(dst), self.starts, self.ends, self.dense)
+        starts, ends = _zeros("q", self.n), _zeros("q", self.n)
+        lib.faf_batch_ascii_case_span(*self._args(), upper, addr,
+                                      _address(starts), _address(ends))
+        return Batch(Buffer(dst), _Ints(starts, 0, self.n), _Ints(ends, 0, self.n))
 
-    def upper(self):
-        return self._into_new(lambda d, o: lib.faf_batch_ascii_case(*self._args(), 1, d, o))
+    def lower(self, out=None, inplace=False):
+        """ASCII lower case. inplace=True changes the strings' own bytes
+        (only for a batch over a bytearray; other batches over the same
+        buffer see the change) and returns this batch."""
+        return self._case(0, out, inplace)
 
-    def join(self, sep=b"\n"):
-        """The strings joined by sep, as a bytearray (e.g. to write out)."""
+    def upper(self, out=None, inplace=False):
+        return self._case(1, out, inplace)
+
+    def join(self, sep=b"\n", out=None):
+        """The strings joined by sep, as a bytearray (e.g. to write out). With
+        `out`, only its first len(result) bytes are written: the return value
+        is a memoryview of them."""
         sep, m = _needle(sep)
         size = self.total() + m * max(self.n - 1, 0)
-        dst = bytearray(size)
+        dst = self._output(out, size)
         lib.faf_batch_join(*self._args(), sep, m, _address(dst) if size else _EMPTY_ADDR)
-        return dst
+        return dst if out is None else memoryview(dst)[:size]
 
     # -- conversions (optional dependencies) --
 

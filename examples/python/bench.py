@@ -135,6 +135,8 @@ def faf_ops():
         "startswith": lambda b, nd: b.startswith(b"2026-09-29T12:0"),
         "lengths": lambda b, nd: b.lengths(),
         "lower": lambda b, nd: b.lower(),
+        # a result buffer allocated once and reused (see run_ops)
+        "lower (reused out)": lambda b, nd: b.lower(out=b._bench_out),
         "hash": lambda b, nd: b.hash(),
         "filter contains": lambda b, nd: b.filter(b.contains(nd)),
     }
@@ -148,6 +150,7 @@ def py_ops():
         "startswith": lambda ls, nd: [s.startswith(b"2026-09-29T12:0") for s in ls],
         "lengths": lambda ls, nd: [len(s) for s in ls],
         "lower": lambda ls, nd: [s.lower() for s in ls],
+        "lower (reused out)": lambda ls, nd: [s.lower() for s in ls],
         # bytes objects cache their hash: see run_ops, which hashes fresh copies
         "hash": lambda ls, nd: [hash(s) for s in ls],
         "filter contains": lambda ls, nd: [s for s in ls if nd in s],
@@ -164,6 +167,7 @@ def pa_ops():
         "startswith": lambda a, nd: pc.starts_with(a, "2026-09-29T12:0"),
         "lengths": lambda a, nd: pc.binary_length(a),
         "lower": lambda a, nd: pc.ascii_lower(a),
+        "lower (reused out)": lambda a, nd: pc.ascii_lower(a),
         # pyarrow has no per-string hash kernel
         "filter contains": lambda a, nd: a.filter(pc.match_substring(a, nd.decode())),
     }
@@ -173,7 +177,7 @@ def comparable(op, impl, out):
     """Results as plain lists, to check the variants agree."""
     if out is None:
         return None
-    if op in ("lower", "filter contains"):
+    if op in ("lower", "lower (reused out)", "filter contains"):
         if impl == "pa":
             return [v.encode() if isinstance(v, str) else v for v in out.to_pylist()]
         return list(out)
@@ -208,6 +212,7 @@ def section_ops(args):
     utf = utf8_lines(max(total // 129, 10), 128, rng)
     run_ops(f"UTF-8 heavy text, 128 B ({len(utf):,})", utf, "données".encode(),
             args, None, 128, ops=["contains", "find", "count ','", "lower"])
+    cold_lower(args)
     if rows_by_len:
         table("Summary: faf vs plain Python / pyarrow by line length (ns per string)",
               ["op"] + [f"{ln} B" for ln in args.lengths],
@@ -217,6 +222,7 @@ def section_ops(args):
 def run_ops(title, lines, needle, args, collect, length, ops=None):
     data = b"\n".join(lines)
     batch = faf.Buffer.from_bytes(data).split(b"\n")
+    batch._bench_out = bytearray(len(data))
     arr = pa.array(lines, pa.large_string()) if pa else None
     n = len(lines)
     fo, po, ao = faf_ops(), py_ops(), pa_ops()
@@ -264,6 +270,40 @@ def summarize(collected, lengths):
                          (f"{ta / tf:.1f}x)" if ta else "n/a)"))
         rows.append([op] + cells)
     return rows
+
+
+def cold_lower(args):
+    """lower once, in a fresh process: no warm memory for anyone (faf's
+    bytearray or pyarrow's pool), as in a script that runs once."""
+    rows = []
+    for length in (8, 128, 4096):
+        cells = []
+        for impl in ("faf", "pyarrow") if pa else ("faf",):
+            out = subprocess.run([sys.executable, __file__, "--worker", f"cold-lower-{impl}",
+                                  str(length), str(args.bytes)],
+                                 capture_output=True, text=True, check=True)
+            cells.append(json.loads(out.stdout.strip().splitlines()[-1])["ns"])
+        rows.append([f"{length} B"] + [fmt_ns(c) for c in cells] +
+                    ([ratio(cells[1], cells[0])] if len(cells) > 1 else []))
+    table("lower, first call in a fresh process (ns per string)",
+          ["lines", "faf", "pyarrow", "pyarrow/faf"][:len(rows[0])], rows)
+
+
+def cold_lower_worker(impl, length, total):
+    n = max(total // (length + 1), 10)
+    lines = log_lines(n, length, 0.01, random.Random(5))
+    if impl == "faf":
+        batch = faf.Buffer.from_bytes(b"\n".join(lines)).split(b"\n")
+        fn = batch.lower
+    else:
+        arr = pa.array(lines, pa.large_string())
+        fn = lambda: pc.ascii_lower(arr)  # noqa: E731
+        pc.ascii_lower(pa.array(["A"]))  # start the compute engine first
+    del lines
+    gc.collect()
+    t0 = time.perf_counter()
+    fn()
+    print(json.dumps({"ns": (time.perf_counter() - t0) * 1e9 / n}))
 
 
 # ---- 2. pipeline (time and peak memory) ----
@@ -441,8 +481,12 @@ def main():
     ap.add_argument("--quick", action="store_true", help="small inputs, fewer runs")
     ap.add_argument("--no-big-file", dest="big_file", action="store_false",
                     help="skip random_strings.txt in the pipeline section")
-    ap.add_argument("--worker", nargs=2, help=argparse.SUPPRESS)
+    ap.add_argument("--worker", nargs="+", help=argparse.SUPPRESS)
     args = ap.parse_args()
+    if args.worker and args.worker[0].startswith("cold-lower-"):
+        cold_lower_worker(args.worker[0][len("cold-lower-"):], int(args.worker[1]),
+                          int(args.worker[2]))
+        return
     if args.worker:
         worker(*args.worker)
         return
