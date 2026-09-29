@@ -440,6 +440,34 @@ In Python, `lower` barely moved (128 B lines 20.6 -> 23.1 ns, 4 KB 797 ->
 20% of pyarrow, and 57-64% of the time is the shim allocating a fresh
 `bytearray` per result. The next fixes are on the Python side.
 
+## 11. Lower case from Python: one pass, and reused memory (09-29)
+
+With the kernel on par, two costs were left, both about memory rather than
+bytes. `faf_batch_ascii_case` called the kernel per string and packed the
+results; pyarrow converts its whole data buffer once and keeps the offsets.
+The batch API now has the same: `faf_batch_ascii_case_range` (the caller
+knows the range: views in order, as after a split or from Arrow),
+`faf_batch_ascii_case_span` (scattered views: find the range, convert it,
+shift the views) and `faf_batch_ascii_case_inplace` (only bytes inside
+views). The shim marks batches `dense` when their range is known without a
+scan: the first version scanned the views twice (for the range, then the
+total) and that alone cost 3x at 8 B lines. In C on the M1 one pass is 3.6x
+faster than a call per line; on both boards 1.9x (`b87c9c1`).
+
+Tests planted two bugs that passed at first (views not shifted, reading from
+the buffer's start): random views always began at 0, where both are no-ops.
+The test now keeps the range off 0.
+
+In place was kept opt-in and only for `bytearray`: `bytes` are immutable,
+writing a copy-on-write mapped file copies each page anyway, and batches
+share buffers, so other views see the change.
+
+Result (`examples/python/RESULTS.md`): with `out=` reused, `lower` equals
+pyarrow's best-of-N from 32 B lines up. Fresh output is what remains: a new
+`bytearray` or anonymous `mmap` fills at ~8 GB/s against ~31 GB/s into
+reused memory, and in a fresh process pyarrow is still ~2x faster at 128 B
+and 4 KB; its allocator gets new memory faster than Python's does.
+
 ## Lessons
 
 - **On in-order cores, codegen details are the performance.** A taken branch,
