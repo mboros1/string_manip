@@ -14,29 +14,33 @@
 
 static char *buf;
 static size_t buf_len;
-static int64_t *starts, *ends, *out64, *os, *oe, *offs;
+static char *arena_buf;
+static faf_arena *arena;
+static faf_batch lines_b; // the input, split once
+static const int64_t *starts, *ends;
+static int64_t *out64;
 static uint8_t *mask;
 static uint64_t *hashes;
 static char *dst;
 
-// False if there isn't memory for the input and the outputs (small boards).
+// Two pools: one holds the split input, the other each result in turn (every
+// benchmark frees what it makes). False if there isn't memory (small boards).
 static bool setup(void) {
   buf_len = 0;
   for (int i = 0; i < NLINES; ++i)
     buf_len += line_lens[i] + 1;
   size_t n = NLINES;
+  size_t pool = buf_len + 2 * (n + 1) * sizeof(int64_t) + 1024;
+  size_t arena_bytes = faf_arena_bytes(2, pool);
   buf = malloc(buf_len);
-  starts = malloc(n * sizeof *starts);
-  ends = malloc(n * sizeof *ends);
+  arena_buf = malloc(arena_bytes);
+  arena = malloc(faf_arena_size());
   out64 = malloc(n * sizeof *out64);
-  os = malloc(n * sizeof *os);
-  oe = malloc(n * sizeof *oe);
-  offs = malloc((n + 1) * sizeof *offs);
   mask = malloc(n);
   hashes = malloc(n * sizeof *hashes);
   dst = malloc(buf_len + 1);
-  if (!buf || !starts || !ends || !out64 || !os || !oe || !offs || !mask ||
-      !hashes || !dst)
+  if (!buf || !arena_buf || !arena || !out64 || !mask || !hashes || !dst ||
+      !faf_arena_init(arena, arena_buf, arena_bytes, 2))
     return false;
   size_t at = 0;
   for (int i = 0; i < NLINES; ++i) {
@@ -45,13 +49,18 @@ static bool setup(void) {
     buf[at++] = '\n';
   }
   buf_len = at - 1; // no trailing newline: exactly NLINES pieces
-  faf_batch_split(buf, buf_len, '\n', starts, ends, n);
-  return true;
+  lines_b = faf_batch_split(arena, buf, buf_len, '\n');
+  starts = faf_batch_starts(lines_b);
+  ends = faf_batch_ends(lines_b);
+  return lines_b != 0;
 }
 
 static void teardown(void) {
-  free(buf), free(starts), free(ends), free(out64), free(os), free(oe);
-  free(offs), free(mask), free(hashes), free(dst);
+  faf_batch_free(lines_b);
+  if (arena)
+    faf_arena_fini(arena);
+  free(buf), free(arena_buf), free(arena), free(out64), free(mask);
+  free(hashes), free(dst);
 }
 
 static faf_string line_at(size_t i) {
@@ -63,10 +72,8 @@ static faf_string line_at(size_t i) {
 static void loop_split(void) {
   faf_string rest = faf_string_init_n(buf, buf_len), piece;
   size_t k = 0;
-  while (faf_string_next_token(&rest, '\n', &piece)) {
-    os[k] = piece.start - buf;
-    oe[k++] = piece.end - buf;
-  }
+  while (faf_string_next_token(&rest, '\n', &piece))
+    k += (size_t)(piece.end - piece.start);
   sink += k;
 }
 
@@ -94,70 +101,63 @@ static void loop_lower(void) {
   sink += (size_t)at;
 }
 
+// A batch that makes a new one: time it, and free the result.
+static void made(faf_batch r) {
+  sink += faf_batch_len(r);
+  faf_batch_free(r);
+}
+
 void bench_batch(void) {
   section("Batch calls", "%d CSV-like lines in one buffer; ns per line", NLINES);
   if (!setup()) {
-    printf("  not enough memory for %zu bytes of input and outputs\n",
-           2 * buf_len);
+    printf("  not enough memory for %zu bytes of input and results\n",
+           3 * buf_len);
     teardown();
     return;
   }
   const size_t n = NLINES;
+  faf_batch b = lines_b;
 
   group_begin("split into lines", NS_PER_OP);
-  BENCH("faf_batch_split", n,
-        sink += faf_batch_split(buf, buf_len, '\n', os, oe, n));
+  BENCH("faf_batch_split (+ free)", n,
+        made(faf_batch_split(arena, buf, buf_len, '\n')));
   BENCH("next_token loop", n, loop_split());
 
   group_begin("contains \"ab\"", NS_PER_OP);
-  BENCH("faf_batch_contains", n,
-        sink += faf_batch_contains(buf, starts, ends, n, "ab", 2, mask));
-  group_note("in %.0f%% of lines",
-             100.0 * faf_batch_contains(buf, starts, ends, n, "ab", 2, mask) / n);
+  BENCH("faf_batch_contains", n, sink += faf_batch_contains(b, "ab", 2, mask));
+  group_note("in %.0f%% of lines", 100.0 * faf_batch_contains(b, "ab", 2, mask) / n);
   BENCH("faf_string_contains loop", n, loop_contains("ab"));
 
   group_begin("contains \"zzz\" (no line)", NS_PER_OP);
-  BENCH("faf_batch_contains", n,
-        sink += faf_batch_contains(buf, starts, ends, n, "zzz", 3, mask));
+  BENCH("faf_batch_contains", n, sink += faf_batch_contains(b, "zzz", 3, mask));
   BENCH("faf_string_contains loop", n, loop_contains("zzz"));
 
   group_begin("hash", NS_PER_OP);
   BENCH("faf_batch_hash", n,
-        faf_batch_hash(buf, starts, ends, n, 0, hashes);
+        faf_batch_hash(b, 0, hashes);
         sink += (size_t)hashes[n - 1]);
   BENCH("faf_string_hash loop", n, loop_hash());
 
   group_begin("lower case copy", NS_PER_OP);
-  BENCH("faf_batch_ascii_case", n,
-        faf_batch_ascii_case(buf, starts, ends, n, 0, dst, offs);
-        sink += (size_t)offs[n]);
+  BENCH("faf_batch_ascii_case (one pass, + free)", n,
+        made(faf_batch_ascii_case(arena, b, 0)));
   BENCH("faf_k_ascii_case loop", n, loop_lower());
-  // same layout: one kernel call over the range the lines cover
-  BENCH("faf_batch_ascii_case_span", n,
-        faf_batch_ascii_case_span(buf, starts, ends, n, 0, dst, os, oe);
-        sink += (size_t)dst[0]);
-  BENCH("faf_batch_ascii_case_range", n,
-        faf_batch_ascii_case_range(buf, 0, (int64_t)buf_len, 0, dst);
-        sink += (size_t)dst[0]);
 
   // one operation each, with nothing to compare against
   group_begin("count ',' per line", NS_PER_OP);
   BENCH("faf_batch_count", n,
-        faf_batch_count(buf, starts, ends, n, ",", 1, out64);
+        faf_batch_count(b, ",", 1, out64);
         sink += (size_t)out64[0]);
   group_begin("find \"ab\" per line", NS_PER_OP);
   BENCH("faf_batch_find", n,
-        faf_batch_find(buf, starts, ends, n, "ab", 2, out64);
+        faf_batch_find(b, "ab", 2, out64);
         sink += (size_t)out64[0]);
-  group_begin("select by mask (views only)", NS_PER_OP);
-  BENCH("faf_batch_select", n,
-        sink += faf_batch_select(starts, ends, n, mask, os, oe));
+  group_begin("select by mask (views only, + free)", NS_PER_OP);
+  BENCH("faf_batch_select", n, made(faf_batch_select(arena, b, mask)));
   group_begin("copy into a new buffer", NS_PER_OP);
-  BENCH("faf_batch_compact", n,
-        faf_batch_compact(buf, starts, ends, n, dst, offs);
-        sink += (size_t)offs[n]);
+  BENCH("faf_batch_compact (+ free)", n, made(faf_batch_compact(arena, b)));
   BENCH("faf_batch_join with \\n", n,
-        sink += (size_t)faf_batch_join(buf, starts, ends, n, "\n", 1, dst));
+        sink += (size_t)faf_batch_join(b, "\n", 1, dst));
   group_end();
 
   teardown();

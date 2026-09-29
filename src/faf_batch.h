@@ -1,141 +1,122 @@
 #ifndef FAF_BATCH_H
 #define FAF_BATCH_H
 
+#include "faf_string_mem.h"
+
 #include <stddef.h>
 #include <stdint.h>
 
-// Batches: one call works on many strings, for use from other languages.
+// Batches: many strings per call, for bindings from other languages (and for
+// C code that works on columns of strings).
 //
-// A batch is views into one byte buffer `data`: string i is
-// data[starts[i], ends[i]). Views may overlap, leave gaps (the separators of
-// a split) or come in any order. An Arrow binary/string array is a batch
-// as it is: starts = offsets, ends = offsets + 1.
+// A batch is views into one byte buffer: string i is data[starts[i], ends[i]).
+// It lives in a region of an arena, and its handle is that region's handle:
+// the views, and the bytes of results that make new strings, go away together
+// with faf_batch_free. A stale handle (freed, or 0 from a call that failed) is
+// rejected by every function: nothing is written, and 0 is returned.
 //
-// Made for foreign function interfaces: every function here is out of line,
-// takes only pointers and integers, and nothing depends on build options, so
-// a binding is a list of declarations (see examples/python). Nothing
-// allocates: outputs go to arrays the caller provides, sized as documented
-// (from n, or from a counting function).
+// Made for foreign function interfaces: handles are integers, everything else
+// is a pointer or an integer, nothing depends on build options, and nothing is
+// allocated except from the arena passed in (NULL: the default arena). Input
+// bytes (and the offsets of faf_batch_from_offsets) are not copied: the
+// caller keeps them alive and unchanged while the batch is in use.
 //
-// The caller guarantees 0 <= starts[i] <= ends[i] <= length of data; nothing
-// here checks it. Positions and lengths are int64_t, as in Arrow.
+// Positions and lengths are int64_t, as in Arrow. One thread at a time per
+// arena, as for regions.
+
+typedef uint64_t faf_batch;
 
 // ---- Making batches ----
 
-// Number of pieces faf_batch_split makes: count(sep) + 1. Like
-// faf_string_split, and Python's bytes.split(sep): "a\n\nb" is "a", "", "b";
-// "" is one empty piece; "a\n" ends with an empty piece.
-size_t faf_batch_split_count(const char *data, size_t len, char sep);
+// Split data[0, len) on `sep`, like Python's bytes.split: "a\n\nb" is "a",
+// "", "b"; "" is one empty string; "a\n" ends with an empty string. 0 if the
+// views don't fit in a region.
+faf_batch faf_batch_split(faf_arena *arena, const char *data, size_t len,
+                          char sep);
 
-// Split data[0, len) on `sep` into starts/ends (views, separators excluded).
-// Writes at most `cap` pieces; returns the total number of pieces.
-size_t faf_batch_split(const char *data, size_t len, char sep,
-                       int64_t *starts, int64_t *ends, size_t cap);
+// A batch over Arrow's layout: string i is data[offsets[i], offsets[i + 1]),
+// offsets has n + 1 entries. Neither is copied.
+faf_batch faf_batch_from_offsets(faf_arena *arena, const char *data,
+                                 const int64_t *offsets, size_t n);
 
-// Views of the strings where mask[i] != 0, in order. out_starts/out_ends need
-// room for n entries (only the first ones, as many as are selected, are
-// meaningful). Returns how many are selected.
-size_t faf_batch_select(const int64_t *starts, const int64_t *ends, size_t n,
-                        const uint8_t *mask, int64_t *out_starts,
-                        int64_t *out_ends);
+// A batch over views the caller already has: string i is
+// data[starts[i], ends[i]), in any order, overlapping or not. Nothing is
+// copied.
+faf_batch faf_batch_from_views(faf_arena *arena, const char *data,
+                               const int64_t *starts, const int64_t *ends,
+                               size_t n);
 
-// Views of strings idx[0..m) (each < n, repeats allowed).
-void faf_batch_take(const int64_t *starts, const int64_t *ends,
-                    const int64_t *idx, size_t m, int64_t *out_starts,
-                    int64_t *out_ends);
+// Give the batch's region back: its views and any bytes it made are gone.
+void faf_batch_free(faf_batch b);
+
+// ---- Reading a batch ----
+
+size_t faf_batch_len(faf_batch b);
+const char *faf_batch_data(faf_batch b);
+const int64_t *faf_batch_starts(faf_batch b);
+const int64_t *faf_batch_ends(faf_batch b);
+
+// Sum of the lengths.
+int64_t faf_batch_total(faf_batch b);
 
 // ---- Per string results: out[i] for each of the n strings ----
 
-void faf_batch_lengths(const int64_t *starts, const int64_t *ends, size_t n,
-                       int64_t *out);
-
-// Sum of the lengths: the bytes faf_batch_compact / faf_batch_ascii_case
-// write.
-int64_t faf_batch_total(const int64_t *starts, const int64_t *ends, size_t n);
+void faf_batch_lengths(faf_batch b, int64_t *out);
 
 // Index of the first `needle` in each string, or -1.
-void faf_batch_find(const char *data, const int64_t *starts,
-                    const int64_t *ends, size_t n, const char *needle,
-                    size_t needle_len, int64_t *out);
+void faf_batch_find(faf_batch b, const char *needle, size_t needle_len,
+                    int64_t *out);
 
-// Non-overlapping occurrences of `needle` in each string (an empty needle
-// matches len + 1 times).
-void faf_batch_count(const char *data, const int64_t *starts,
-                     const int64_t *ends, size_t n, const char *needle,
-                     size_t needle_len, int64_t *out);
+// Non-overlapping occurrences of `needle` (an empty needle matches len + 1
+// times).
+void faf_batch_count(faf_batch b, const char *needle, size_t needle_len,
+                     int64_t *out);
 
-// 1 / 0 per string. Each returns how many are 1.
-size_t faf_batch_contains(const char *data, const int64_t *starts,
-                          const int64_t *ends, size_t n, const char *needle,
-                          size_t needle_len, uint8_t *out);
-size_t faf_batch_starts_with(const char *data, const int64_t *starts,
-                             const int64_t *ends, size_t n, const char *prefix,
-                             size_t prefix_len, uint8_t *out);
-size_t faf_batch_ends_with(const char *data, const int64_t *starts,
-                           const int64_t *ends, size_t n, const char *suffix,
-                           size_t suffix_len, uint8_t *out);
-size_t faf_batch_eq(const char *data, const int64_t *starts,
-                    const int64_t *ends, size_t n, const char *other,
-                    size_t other_len, uint8_t *out);
-// Equality with ASCII letters compared case-insensitively.
-size_t faf_batch_eq_icase(const char *data, const int64_t *starts,
-                          const int64_t *ends, size_t n, const char *other,
-                          size_t other_len, uint8_t *out);
+// 1 / 0 per string; each returns how many are 1. eq_icase compares ASCII
+// letters case-insensitively.
+size_t faf_batch_contains(faf_batch b, const char *needle, size_t needle_len,
+                          uint8_t *out);
+size_t faf_batch_starts_with(faf_batch b, const char *prefix, size_t prefix_len,
+                             uint8_t *out);
+size_t faf_batch_ends_with(faf_batch b, const char *suffix, size_t suffix_len,
+                           uint8_t *out);
+size_t faf_batch_eq(faf_batch b, const char *other, size_t other_len,
+                    uint8_t *out);
+size_t faf_batch_eq_icase(faf_batch b, const char *other, size_t other_len,
+                          uint8_t *out);
 
 // faf_string_hash_seed of each string.
-void faf_batch_hash(const char *data, const int64_t *starts,
-                    const int64_t *ends, size_t n, uint64_t seed,
-                    uint64_t *out);
+void faf_batch_hash(faf_batch b, uint64_t seed, uint64_t *out);
 
-// ---- New bytes ----
-// These write the strings one after another into `dst` (faf_batch_total
-// bytes), and dst_offsets[0..n] (n + 1 entries) so that the result is an
-// Arrow-style batch: string i is dst[dst_offsets[i], dst_offsets[i + 1]).
+// ---- New batches ----
+// Each takes a new region from `arena`, and returns 0 if none is free or the
+// result doesn't fit in one.
 
-// A contiguous copy.
-void faf_batch_compact(const char *data, const int64_t *starts,
-                       const int64_t *ends, size_t n, char *dst,
-                       int64_t *dst_offsets);
+// Views of the strings where mask[i] != 0 (n entries), in order. No bytes
+// are copied: the result views the same data.
+faf_batch faf_batch_select(faf_arena *arena, faf_batch b, const uint8_t *mask);
 
-// ASCII lower case (upper != 0: upper case) copy; other bytes unchanged.
-void faf_batch_ascii_case(const char *data, const int64_t *starts,
-                          const int64_t *ends, size_t n, int upper, char *dst,
-                          int64_t *dst_offsets);
+// Views of strings idx[0..m) (each < n, repeats allowed).
+faf_batch faf_batch_take(faf_arena *arena, faf_batch b, const int64_t *idx,
+                         size_t m);
 
-// ---- Same layout: one pass over the range the views cover ----
-// For batches whose views cover most of their range (the lines of a file):
-// one kernel call instead of one per string, and the views can be reused.
+// ASCII lower case (upper != 0: upper case) copies of the strings, in the new
+// region. Other bytes are unchanged. Views in order over most of their range
+// (a split, Arrow offsets) are converted in one pass over that range;
+// scattered ones string by string.
+faf_batch faf_batch_ascii_case(faf_arena *arena, faf_batch b, int upper);
 
-// Length of the range the views cover, [min start, max end), and its start in
-// *lo. 0 (and *lo = 0) for n == 0.
-int64_t faf_batch_span(const int64_t *starts, const int64_t *ends, size_t n,
-                       int64_t *lo);
+// The strings end to end in the new region (Arrow layout).
+faf_batch faf_batch_compact(faf_arena *arena, faf_batch b);
 
-// ASCII case copy of the whole span into `dst` (faf_batch_span bytes; the
-// bytes between views are copied too, converted), and the views shifted to
-// it: out_starts[i] = starts[i] - lo, same for ends. out_starts / out_ends
-// may be NULL when lo is 0: the input views then describe dst as they are.
-void faf_batch_ascii_case_span(const char *data, const int64_t *starts,
-                               const int64_t *ends, size_t n, int upper,
-                               char *dst, int64_t *out_starts,
-                               int64_t *out_ends);
+// ---- Writing ----
 
-// ASCII case copy of data[lo, lo + len) into dst: for a caller that knows
-// the span without scanning the views (a split, an Arrow array: views in
-// order, starting at starts[0] and ending at ends[n - 1]).
-void faf_batch_ascii_case_range(const char *data, int64_t lo, int64_t len,
-                                int upper, char *dst);
+// Convert the strings where they are: only bytes inside views change. The
+// batch's data must be writable (the caller's own buffer).
+void faf_batch_ascii_case_inplace(faf_batch b, int upper);
 
-// Convert the strings in place: only bytes inside views change. Overlapping
-// views are fine (converting twice is the same as once).
-void faf_batch_ascii_case_inplace(char *data, const int64_t *starts,
-                                  const int64_t *ends, size_t n, int upper);
-
-// The strings joined by `sep` (e.g. "\n" to write lines out), into `dst`:
-// faf_batch_total + (n - 1) * sep_len bytes (0 for n == 0). Returns the
-// bytes written.
-int64_t faf_batch_join(const char *data, const int64_t *starts,
-                       const int64_t *ends, size_t n, const char *sep,
-                       size_t sep_len, char *dst);
+// The strings joined by `sep` into `dst`, which holds faf_batch_total(b) +
+// (n - 1) * sep_len bytes (0 for n == 0). Returns the bytes written.
+int64_t faf_batch_join(faf_batch b, const char *sep, size_t sep_len, char *dst);
 
 #endif // FAF_BATCH_H
