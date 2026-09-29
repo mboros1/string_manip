@@ -354,8 +354,17 @@ same commit, same board, arenas on vs off.
 
 The indirection is the whole cost: acquire/release 10-18%, anything that
 allocates about 2%, nothing else. With arenas off the S3's copy + release is
-684.9 ns, as before arenas. Arenas stay on by default (the bindings need
-them); microcontroller builds can turn them off.
+684.9 ns, as before arenas.
+
+**Defaults.** Turning arenas off on microcontrollers looked like the sensible
+default ("static memory, one thread"), but arenas don't use the heap, and
+typical ESP-IDF firmware runs several FreeRTOS tasks on two cores: with only
+the default arena, tasks sharing it would need a lock around every region
+operation, while with arenas each task gets its own static buffer. The cost
+is bounded: arena init once, 40-90 ns more per region lifetime, a few cycles
+per allocation, nothing for code that doesn't allocate. So arenas stay on by
+default everywhere, the board apps included, and `FAF_ARENAS=0` is opt-in for
+firmware where one task does all the string work.
 
 ## Lessons
 

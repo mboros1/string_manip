@@ -55,8 +55,12 @@ so it belongs to one thread too.
 Re-initializing an arena resets its generations, so handles from before it
 are not detected as stale: release them first.
 
-**Turning arenas off.** Build with `-DFAF_ARENAS=0` and there is only the
-default arena: the `faf_arena_*` functions aren't declared, region handles are
+**Turning arenas off.** Arenas are on by default everywhere, including
+microcontrollers: an arena over a `static` buffer is still static memory, and
+it is the way to give each task of multi-task firmware (FreeRTOS, both cores
+of an ESP32) its own pools without locks. Turn them off only when one task, or
+one owner, does all the string work. Build with `-DFAF_ARENAS=0` and there is
+only the default arena: the `faf_arena_*` functions aren't declared, region handles are
 4 bytes instead of 16, and pool sizes are compile-time constants again. On the
 ESP32 and ESP32-S3 that makes acquire + release 10-18% faster and everything
 that allocates from regions about 2% faster (same commit, same board, only
@@ -64,6 +68,11 @@ the flag changed); kernels and rings are unaffected. The allocator then
 compiles to what it was before arenas (one extra instruction in
 `faf_reserve`). `make check_no_arenas` runs the tests in that configuration,
 and `make esp32_test ESP32_DEFINES=FAF_ARENAS=0` on a board.
+
+What arenas cost, and when: `faf_arena_init` once; region acquire + release
+once per region lifetime (about 40-90 ns more on the boards, so it adds up
+only when regions are acquired per item); a few cycles per allocation (the
+~2%); nothing for code that doesn't allocate (kernels, views, search, rings).
 
 ## Rings
 
