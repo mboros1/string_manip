@@ -2,17 +2,22 @@
 #include "faf_test.h"
 
 #include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
 
 // Batch results are checked against small reference implementations written
 // here, not against the per-string library functions the batch calls.
 
-#define MAXN 256
-static int64_t starts[MAXN], ends[MAXN], out64[MAXN], ref64[MAXN];
-static uint8_t out8[MAXN];
-static uint64_t outh[MAXN];
-static char dst[4096];
-static int64_t dst_off[MAXN + 1];
+// Buffers are allocated for each test (batch_setup), not static: the
+// original ESP32 runs every test file in one image, and static data there
+// comes out of the RAM FreeRTOS needs at startup.
+#define MAXN 128
+#define DST_BYTES 2048
+#define SPLIT_BYTES 1024
+static int64_t *starts, *ends, *out64, *ref64, *os, *oe, *dst_off;
+static uint8_t *out8;
+static uint64_t *outh;
+static char *dst, *split_buf;
 
 // Deterministic xorshift.
 static uint32_t rng_state = 2463534242u;
@@ -59,7 +64,7 @@ static int64_t ref_count(const char *s, size_t n, const char *sub, size_t m) {
 static char lower(char c) { return c >= 'A' && c <= 'Z' ? c + 32 : c; }
 
 static void check_split(const char *s, size_t len, char sep, const char *what) {
-  static int64_t rs[MAXN], re[MAXN];
+  int64_t *rs = out64, *re = ref64; // scratch for the reference
   size_t want = ref_split(s, len, sep, rs, re);
   ASSERT_INT_EQ((int)want, (int)faf_batch_split_count(s, len, sep), what);
   size_t got = faf_batch_split(s, len, sep, starts, ends, MAXN);
@@ -79,9 +84,9 @@ static void test_split_cases(void) {
 
 static void test_split_random(void) {
   // separators at every density and position, across the 64-per-scan batches
-  static char buf[2048];
+  char *buf = split_buf;
   for (int round = 0; round < 200; ++round) {
-    size_t len = rng() % sizeof buf;
+    size_t len = rng() % SPLIT_BYTES;
     unsigned density = 1 + rng() % 40; // one separator per `density` bytes
     for (size_t i = 0; i < len; ++i)
       buf[i] = rng() % density == 0 ? ',' : (char)('a' + rng() % 26);
@@ -107,7 +112,7 @@ static void test_split_cap(void) {
 static const char *words = "Error: disk FULL; error again, ERROR x; errors";
 static size_t make_views(void) {
   size_t len = strlen(words), n = 0;
-  for (; n < 100; ++n) {
+  for (; n < 64; ++n) {
     size_t a = rng() % (len + 1), b = rng() % (len + 1);
     starts[n] = (int64_t)(a < b ? a : b);
     ends[n] = (int64_t)(a < b ? b : a);
@@ -181,7 +186,6 @@ static void test_prefix_suffix_eq(void) {
 
 static void test_select_take(void) {
   size_t n = make_views();
-  static int64_t os[MAXN], oe[MAXN];
   uint8_t mask[MAXN];
   size_t want = 0;
   for (size_t i = 0; i < n; ++i)
@@ -194,7 +198,7 @@ static void test_select_take(void) {
       ++k;
     }
 
-  int64_t idx[5] = {3, 0, 3, 99, 42};
+  int64_t idx[5] = {3, 0, 3, 63, 42};
   faf_batch_take(starts, ends, idx, 5, os, oe);
   for (size_t i = 0; i < 5; ++i)
     ASSERT_TRUE(os[i] == starts[idx[i]] && oe[i] == ends[idx[i]], "take view");
@@ -221,9 +225,9 @@ static void test_lengths_hash(void) {
 static void test_new_bytes(void) {
   size_t n = make_views();
   int64_t total = faf_batch_total(starts, ends, n);
-  ASSERT_TRUE(total < (int64_t)sizeof dst, "test buffer too small");
+  ASSERT_TRUE(total < (int64_t)DST_BYTES, "test buffer too small");
 
-  memset(dst, '#', sizeof dst);
+  memset(dst, '#', DST_BYTES);
   faf_batch_compact(words, starts, ends, n, dst, dst_off);
   ASSERT_TRUE(dst_off[0] == 0 && dst_off[n] == total, "compact offsets");
   for (size_t i = 0; i < n; ++i) {
@@ -235,7 +239,7 @@ static void test_new_bytes(void) {
   ASSERT_TRUE(dst[total] == '#', "compact wrote past its total");
 
   for (int upper = 0; upper <= 1; ++upper) {
-    memset(dst, '#', sizeof dst);
+    memset(dst, '#', DST_BYTES);
     faf_batch_ascii_case(words, starts, ends, n, upper, dst, dst_off);
     for (size_t i = 0; i < n; ++i)
       for (int64_t j = 0; j < ends[i] - starts[i]; ++j) {
@@ -246,7 +250,7 @@ static void test_new_bytes(void) {
     ASSERT_TRUE(dst[total] == '#', "ascii_case wrote past its total");
   }
 
-  memset(dst, '#', sizeof dst);
+  memset(dst, '#', DST_BYTES);
   int64_t wrote = faf_batch_join(words, starts, ends, n, "\r\n", 2, dst);
   ASSERT_TRUE(wrote == total + 2 * (int64_t)(n - 1), "join size");
   ASSERT_TRUE(dst[wrote] == '#', "join wrote past its size");
@@ -288,8 +292,21 @@ static test_case_t batch_tests[] = {
     {"high_bytes", test_high_bytes},
 };
 
-static void batch_setup(void) {}
-static void batch_teardown(void) {}
+static void batch_setup(void) {
+  int64_t **arrays[] = {&starts, &ends, &out64, &ref64, &os, &oe};
+  for (size_t i = 0; i < sizeof arrays / sizeof arrays[0]; ++i)
+    *arrays[i] = malloc(MAXN * sizeof(int64_t));
+  dst_off = malloc((MAXN + 1) * sizeof(int64_t));
+  out8 = malloc(MAXN);
+  outh = malloc(MAXN * sizeof(uint64_t));
+  dst = malloc(DST_BYTES);
+  split_buf = malloc(SPLIT_BYTES);
+}
+
+static void batch_teardown(void) {
+  free(starts), free(ends), free(out64), free(ref64), free(os), free(oe);
+  free(dst_off), free(out8), free(outh), free(dst), free(split_buf);
+}
 
 int main(int argc, char **argv) {
   test_suite_t suite =
