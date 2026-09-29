@@ -15,11 +15,12 @@ the others. Plain Python works on `bytes` (ASCII semantics, like faf).
   best kernels (byte search at 62 GB/s, count at 25 GB/s in C) with one
   byte or one int of output per string.
 - **Making new bytes loses to pyarrow.** `lower` is 3-6x faster than plain
-  Python but 4-30x slower than pyarrow: faf's lower case kernel is its
-  slowest (10.7 GB/s in C, where pyarrow gets about 30 GB/s), it is called
-  once per string instead of once over the buffer, and the Python side
-  allocates a fresh zero-filled output every call. Short-string `lengths` and
-  `startswith` are also slightly faster in pyarrow.
+  Python but 5-15x slower than pyarrow. After the kernel rewrite (below) the
+  C call itself is close to pyarrow's (5.2 vs 4.3 ns per 128 B line, 139 vs
+  126 ns per 4 KB line, writing into memory that is already mapped); what's
+  left is the shim allocating a fresh zero-filled `bytearray` for every
+  result (57-64% of the time). Short-string `lengths` and `startswith` are
+  also slightly faster in pyarrow.
 - **Pipelines:** load 529 MB of log lines, keep the 2% with ERROR, lower case
   them, write them out: faf 0.30 s, pyarrow 1.52 s, plain Python 2.03 s
   (streaming line by line: 1.93 s). faf is 5-7x faster end to end.
@@ -96,6 +97,30 @@ four write byte-identical output.
 | bytes, 80 B | 137 | 40.0 | 14.3 |
 | str, 80 B | 165 | 42.0 | 13.4 |
 | str, short keys | 152 | 27.3 | 17.3 |
+
+## After the `ascii_case` rewrite (`c6f6d89`)
+
+The lower case kernel went from 10.7 to 41.4 GB/s in C (`dcbad6c`). In
+Python, `lower` changed much less:
+
+| lower, ns per string | 8 B | 32 B | 128 B | 512 B | 4096 B |
+|---|---:|---:|---:|---:|---:|
+| before (`95af983`) | 9.5 | 7.1 | 20.6 | 82.2 | 797 |
+| after (`c6f6d89`) | 4.6 | 7.7 | 23.1 | 75.0 | 638 |
+| pyarrow `ascii_lower` | 0.3 | 1.0 | 4.3 | 16.7 | 126 |
+
+Where the time goes, measured separately (same data, ns per string):
+
+| lines | `lower()` | fresh `bytearray` | offsets array | C call into reused buffers |
+|---|---:|---:|---:|---:|
+| 128 B x 260k | 17.3 | 9.8 | 0.6 | 5.2 |
+| 4096 B x 8k | 465 | 298 | 0.2 | 139 |
+
+So the kernel is no longer the problem; allocating (and first touching) a new
+output buffer every call is. The fixes are on the Python side: an output
+buffer the caller can reuse, and lowering a batch that covers most of its
+buffer in one pass with the same views, as pyarrow does. Every other
+operation matched the first run within noise.
 
 <details><summary>Full output</summary>
 
@@ -255,6 +280,166 @@ ns per string, 1,000,000 strings from a Python list
   bytes, 80 B                137           40.0                   14.3
   str, 80 B                  165           42.0                   13.4
   str, short keys            152           27.3                   17.3
+```
+
+Second run, after the kernel rewrite:
+
+```
+faf Python example benchmarks, commit c6f6d8954
+macOS-26.0.1-arm64-arm-64bit, arm, Python 3.12.10 (CPython), pyarrow 19.0.1
+
+== 1. Is a batch op fast? ==========================================
+
+lines of 8 B (3,728,270 lines, ~1% contain ERROR) -- ns per string
+  op                faf  python  pyarrow  python/faf  pyarrow/faf
+  ----------------  ---  ------  -------  ----------  -----------
+  contains          4.3     224     10.9      52.14x        2.54x
+  find              4.7    79.4      9.9      16.96x        2.12x
+  count ','         4.4    82.3     10.2      18.88x        2.35x
+  startswith        1.6    69.6      0.9      42.59x        0.56x
+  lengths           1.3    14.6      0.3      11.26x        0.21x
+  lower             4.6    29.3      0.3       6.35x        0.06x
+  hash              5.5    45.7      n/a       8.30x             
+  filter contains   6.9     228     10.9      33.13x        1.58x
+  split into lines  4.0    19.8     14.9       4.96x        3.73x
+
+lines of 32 B (1,016,800 lines, ~1% contain ERROR) -- ns per string
+  op                 faf  python  pyarrow  python/faf  pyarrow/faf
+  ----------------  ----  ------  -------  ----------  -----------
+  contains          14.9     240     53.5      16.16x        3.60x
+  find              14.4    82.3     51.5       5.71x        3.58x
+  count ','          5.9    92.7     44.1      15.58x        7.41x
+  startswith         4.0    76.1      5.5      19.16x        1.39x
+  lengths            1.3    15.8      0.3      11.81x        0.22x
+  lower              7.7    42.6      1.0       5.49x        0.13x
+  hash               9.0    51.6      n/a       5.71x             
+  filter contains   15.9     227     54.6      14.30x        3.44x
+  split into lines   6.5    33.6     29.8       5.20x        4.61x
+
+lines of 128 B (260,111 lines, ~1% contain ERROR) -- ns per string
+  op                 faf  python  pyarrow  python/faf  pyarrow/faf
+  ----------------  ----  ------  -------  ----------  -----------
+  contains          29.5     286      249       9.68x        8.44x
+  find              30.2     139      246       4.60x        8.13x
+  count ','          8.4     159      240      19.00x       28.64x
+  startswith         4.5    75.2      5.8      16.67x        1.29x
+  lengths            1.3    16.6      0.4      13.17x        0.34x
+  lower             23.1    91.4      4.3       3.96x        0.19x
+  hash              28.2    96.7      n/a       3.43x             
+  filter contains   32.3     282      251       8.71x        7.77x
+  split into lines  13.3    90.3     72.5       6.79x        5.45x
+
+lines of 512 B (65,408 lines, ~1% contain ERROR) -- ns per string
+  op                 faf  python  pyarrow  python/faf  pyarrow/faf
+  ----------------  ----  ------  -------  ----------  -----------
+  contains          96.8     563    1,020       5.81x       10.53x
+  find              96.9     413    1,006       4.26x       10.38x
+  count ','         17.7     354      993      20.05x       56.25x
+  startswith        20.1     106     17.8       5.30x        0.89x
+  lengths            0.9    61.0      0.7      69.65x        0.83x
+  lower             75.0     315     16.7       4.20x        0.22x
+  hash               133     310      n/a       2.33x             
+  filter contains   96.9     556    1,024       5.74x       10.57x
+  split into lines  47.9     312      245       6.52x        5.11x
+
+lines of 4096 B (8,190 lines, ~1% contain ERROR) -- ns per string
+  op                  faf  python  pyarrow  python/faf  pyarrow/faf
+  ----------------  -----  ------  -------  ----------  -----------
+  contains            674   2,958    8,185       4.39x       12.14x
+  find                674   2,784    8,165       4.13x       12.12x
+  count ','           175   2,231    8,006      12.75x       45.77x
+  startswith         18.9     107     25.0       5.67x        1.32x
+  lengths             2.2    49.6      4.1      22.19x        1.84x
+  lower               638   2,057      126       3.23x        0.20x
+  hash              1,373   1,994      n/a       1.45x             
+  filter contains     699   2,946    8,168       4.21x       11.68x
+  split into lines    302   2,116    1,802       7.02x        5.97x
+
+128 B lines, 1% contain ERROR (260,111 lines) -- ns per string
+  op                 faf  python  pyarrow  python/faf  pyarrow/faf
+  ----------------  ----  ------  -------  ----------  -----------
+  contains          29.4     284      250       9.64x        8.49x
+  find              30.3     138      245       4.56x        8.07x
+  filter contains   31.0     281      251       9.05x        8.08x
+  split into lines  13.4    91.2     72.6       6.82x        5.43x
+
+128 B lines, 50% contain ERROR (260,111 lines) -- ns per string
+  op                 faf  python  pyarrow  python/faf  pyarrow/faf
+  ----------------  ----  ------  -------  ----------  -----------
+  contains          24.4     265      157      10.88x        6.43x
+  find              24.7     120      152       4.87x        6.17x
+  filter contains   26.3     267      166      10.17x        6.33x
+  split into lines  12.9    90.0     74.0       7.00x        5.75x
+
+short keys, 8-24 B (2,097,152) -- ns per string
+  op                 faf  python  pyarrow  python/faf  pyarrow/faf
+  ----------------  ----  ------  -------  ----------  -----------
+  contains           8.2     241     21.9      29.53x        2.69x
+  startswith         6.7    75.9      5.5      11.32x        0.82x
+  lengths            1.2    15.4      0.3      12.75x        0.23x
+  hash              16.4    61.4      n/a       3.74x             
+  lower              8.7    37.5      0.5       4.32x        0.05x
+  split into lines   7.2    32.4     24.4       4.49x        3.39x
+
+UTF-8 heavy text, 128 B (260,111) -- ns per string
+  op                 faf  python  pyarrow  python/faf  pyarrow/faf
+  ----------------  ----  ------  -------  ----------  -----------
+  contains          42.8     292      148       6.83x        3.45x
+  find              42.6     139      145       3.26x        3.40x
+  count ','          8.6     159      240      18.53x       27.90x
+  lower             22.4    94.7      4.5       4.23x        0.20x
+  split into lines  12.8    88.8     72.8       6.95x        5.70x
+
+Summary: faf vs plain Python / pyarrow by line length (ns per string)
+  op                              8 B                 32 B                128 B                 512 B               4096 B
+  ---------------  ------------------  -------------------  -------------------  --------------------  -------------------
+  contains         4.3 (52.1x / 2.5x)  14.9 (16.2x / 3.6x)   29.5 (9.7x / 8.4x)   96.8 (5.8x / 10.5x)   674 (4.4x / 12.1x)
+  find             4.7 (17.0x / 2.1x)   14.4 (5.7x / 3.6x)   30.2 (4.6x / 8.1x)   96.9 (4.3x / 10.4x)   674 (4.1x / 12.1x)
+  count ','        4.4 (18.9x / 2.4x)   5.9 (15.6x / 7.4x)  8.4 (19.0x / 28.6x)  17.7 (20.0x / 56.2x)  175 (12.8x / 45.8x)
+  startswith       1.6 (42.6x / 0.6x)   4.0 (19.2x / 1.4x)   4.5 (16.7x / 1.3x)    20.1 (5.3x / 0.9x)   18.9 (5.7x / 1.3x)
+  lengths          1.3 (11.3x / 0.2x)   1.3 (11.8x / 0.2x)   1.3 (13.2x / 0.3x)    0.9 (69.6x / 0.8x)   2.2 (22.2x / 1.8x)
+  lower             4.6 (6.4x / 0.1x)    7.7 (5.5x / 0.1x)   23.1 (4.0x / 0.2x)    75.0 (4.2x / 0.2x)    638 (3.2x / 0.2x)
+  hash               5.5 (8.3x / n/a)     9.0 (5.7x / n/a)    28.2 (3.4x / n/a)      133 (2.3x / n/a)   1,373 (1.5x / n/a)
+  filter contains  6.9 (33.1x / 1.6x)  15.9 (14.3x / 3.4x)   32.3 (8.7x / 7.8x)   96.9 (5.7x / 10.6x)   699 (4.2x / 11.7x)
+
+== 2. Does staying in views pay off? ===============================
+
+log lines, 110 B, 2% ERROR: 529 MB -> keep ERROR lines, lower, write (best of 3, fresh process each; memory: peak above the warmed-up process)
+  variant           seconds  peak MB  x file size  lines out
+  ----------------  -------  -------  -----------  ---------
+  faf                 0.294      708        1.34x    100,431
+  python              2.016    1,229        2.32x    100,431
+  python streaming    1.981        0        0.00x    100,431
+  pyarrow             1.545    1,138        2.15x    100,431
+
+random_strings.txt (no ERROR lines): 572 MB -> keep ERROR lines, lower, write (best of 3, fresh process each; memory: peak above the warmed-up process)
+  variant           seconds  peak MB  x file size  lines out
+  ----------------  -------  -------  -----------  ---------
+  faf                 0.335      575        1.01x          1
+  python              0.960    1,175        2.05x          1
+  python streaming    0.881        0        0.00x          1
+  pyarrow             1.645    1,146        2.00x          1
+
+== 3. When is a batch too small? ==================================
+
+ns per string, faf / plain Python, 80 B lines (python/faf > 1: faf wins)
+  strings      contains                lower             lengths        
+  ---------  ----------  ------  -----------  -----  -----------  ------
+  10          140 / 275   1.97x   527 / 83.2  0.16x  85.5 / 32.7   0.38x
+  100        24.9 / 263  10.55x  60.1 / 65.6  1.09x  10.5 / 20.9   1.98x
+  1,000      17.0 / 257  15.12x  12.0 / 56.9  4.75x   1.6 / 16.0   9.87x
+  10,000     22.1 / 257  11.61x   9.2 / 58.2  6.34x   1.1 / 15.2  14.23x
+  100,000    22.1 / 256  11.57x  14.0 / 61.5  4.39x   1.1 / 14.4  13.14x
+  1,000,000  22.0 / 256  11.64x  13.5 / 63.5  4.69x   1.2 / 16.1  13.42x
+
+== 4. What does ingest from Python objects cost? ==================
+
+ns per string, 1,000,000 strings from a Python list
+  input            faf from_list  pyarrow array  faf lower (for scale)
+  ---------------  -------------  -------------  ---------------------
+  bytes, 80 B                131           35.4                   11.9
+  str, 80 B                  153           36.0                   12.1
+  str, short keys            151           27.2                    7.3
 ```
 
 </details>

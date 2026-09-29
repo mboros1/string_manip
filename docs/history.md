@@ -411,6 +411,35 @@ on the way: Python caches the hash of a `bytes` object, so hashing had to be
 timed on fresh copies; and pyarrow starts its compute engine on first use
 (~0.2 s), so every pipeline variant warms up on a tiny file first.
 
+## 10. The lower case kernel (09-29)
+
+The Python results blamed three things for losing `lower` to pyarrow; the
+kernel was first. NEON/SSE2 (`dcbad6c`): the loop did 16 bytes at a time with
+the tail test inside it; now 64 bytes in four independent vectors with the
+last block loaded up front, two overlapping blocks for 17-32 bytes, and
+overlapping 8 / 4 byte words below 16 (it was a byte at a time). Measured
+alternately against the old kernel in separate files (in the same file the
+compiler inlined the old one into the timing loop, which flattered it): 3.9x
+at 4 KB (40.9 GB/s), 2x at 512 B, 3-5x at 7-15 B; exactly 16 B is 0.4 ns
+slower (the block is converted twice). One trap: a small helper wasn't
+inlined, so the kernel saved eight registers on every entry, including the
+16 byte path; `always_inline` fixed it. SWAR (the boards): the loop called
+`to_case(x, upper)`, which GCC turned into both cases plus a branch and two
+constant reloads per word, ~25 cycles per word; the constants are now chosen
+before the loop and it does two words per iteration (the same inlining trap
+again, on Xtensa).
+
+Recorded (`c6f6d89` against `bc6679c`): kernel 10.7 -> 41.4 GB/s on the M1,
+38 -> 76 MB/s on the ESP32 and 40 -> 80 MB/s on the S3; batch lower 32-43%
+faster everywhere, and churn (which lower cases its keys) 20% faster on both
+boards. On the way, `faf_batch` and `bench_batch` were added to the boards'
+IRAM list (`ab244f5`); it changed nothing, since the loops were cache resident.
+
+In Python, `lower` barely moved (128 B lines 20.6 -> 23.1 ns, 4 KB 797 ->
+638 ns): measured separately, the C call into reused buffers is now within
+20% of pyarrow, and 57-64% of the time is the shim allocating a fresh
+`bytearray` per result. The next fixes are on the Python side.
+
 ## Lessons
 
 - **On in-order cores, codegen details are the performance.** A taken branch,
@@ -423,6 +452,8 @@ timed on fresh copies; and pyarrow starts its compute engine on first use
   instruction for the job (`bnone`), which the SWAR habit had missed.
 - **Check that the test can fail.** A mutant that passes may not have been
   built: with second-resolution timestamps, `make` can skip the rebuild.
+- **Speed a kernel up, then check where the time went.** A 3.9x faster kernel
+  moved Python's `lower` by 0-50%: the allocation around it was the cost.
 - **Keep an oracle.** Every backend is checked against the `ref` kernels at
   every length and alignment; it caught each assembly bug before a benchmark
   could.
