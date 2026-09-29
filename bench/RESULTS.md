@@ -61,6 +61,8 @@ esp32 rev 301, 240 MHz, ESP-IDF v6.1
 | 2026-09-28 `2335dc5de` format: use out-of-line builder appends (inlining them made  | swar | 7,625 | 57,252 | 4,400 | 5,815 |  | 5,200 | 7,326 | 703,694 | 111,228 |
 | 2026-09-28 `7b7a72194` faf_tokens: batched split iterator, separators found 16 at a | swar | 7,615 | 57,365 | 4,382 | 5,810 | 5,090 | 5,195 | 7,326 | 703,694 | 111,228 |
 | 2026-09-28 `38bd90fa9` pie: SWAR lead inlined in the same unit, 64-byte chunks, 32- | swar | 7,610 | 57,355 | 4,385 | 5,810 | 5,090 | 5,195 | 7,319 | 703,694 | 111,228 |
+| 2026-09-29 `cf5a35fb4` ESP32_DEFINES: extra definitions for the board apps; bench h | swar | 7,738 | 63,958 | 4,460 | 5,815 | 5,102 | 5,275 | 7,443 | 720,792 | 110,548 |
+| 2026-09-29 `cf5a35fb4` ESP32_DEFINES: extra definitions for the board apps; bench h | swar, arenas off | 7,578 | 64,012 | 4,358 | 5,810 | 5,092 | 5,170 | 7,290 | 703,672 | 111,206 |
 
 **Kernels, MB/s (higher is better)**
 
@@ -70,6 +72,8 @@ esp32 rev 301, 240 MHz, ESP-IDF v6.1
 | 2026-09-28 `2335dc5de` format: use out-of-line builder appends (inlining them made  | swar | 101 | 56.3 | 119 | 59.9 | 19.2 | 38.3 |
 | 2026-09-28 `7b7a72194` faf_tokens: batched split iterator, separators found 16 at a | swar | 101 | 56.3 | 119 | 59.9 | 19.2 | 38.3 |
 | 2026-09-28 `38bd90fa9` pie: SWAR lead inlined in the same unit, 64-byte chunks, 32- | swar | 101 | 56.3 | 119 | 59.9 | 19.2 | 38.3 |
+| 2026-09-29 `cf5a35fb4` ESP32_DEFINES: extra definitions for the board apps; bench h | swar | 101 | 56.4 | 119 | 59.9 | 19.2 | 38.3 |
+| 2026-09-29 `cf5a35fb4` ESP32_DEFINES: extra definitions for the board apps; bench h | swar, arenas off | 101 | 56.3 | 119 | 59.9 | 19.2 | 38.3 |
 
 ## esp32s3
 
@@ -92,6 +96,9 @@ esp32s3 rev 2, 240 MHz, ESP-IDF v6.1
 | 2026-09-28 `e52885f38` pie: mismatch in assembly (SSA8L/SRC funnel shift for unalig | pie | 5,912 | 45,928 | 2,900 | 4,375 | 3,455 | 3,715 |  |  |  |
 | 2026-09-28 `d5eacf2bb` bench: count_byte and ascii_prefix on short lines | pie | 5,912 | 45,928 | 2,900 | 4,375 | 3,455 | 3,712 |  |  |  |
 | 2026-09-28 `7b638d567` pie: count_byte and ascii_prefix in assembly; PIE kernels in | pie | 5,912 | 45,925 | 2,900 | 4,375 | 3,455 | 3,712 |  |  |  |
+| 2026-09-29 `6a5616b78` faf_ring: 32-bit capacity check only where size_t is wider ( | pie | 6,030 | 45,815 | 2,972 | 4,378 | 3,462 | 3,788 | 6,689 | 603,754 | 102,252 |
+| 2026-09-29 `cf5a35fb4` ESP32_DEFINES: extra definitions for the board apps; bench h | pie | 6,015 | 45,828 | 2,968 | 4,380 | 3,462 | 3,780 | 6,681 | 603,748 | 102,246 |
+| 2026-09-29 `cf5a35fb4` ESP32_DEFINES: extra definitions for the board apps; bench h | pie, arenas off | 5,885 | 45,938 | 2,880 | 4,375 | 3,455 | 3,692 | 6,557 | 586,738 | 101,954 |
 
 **Kernels, MB/s (higher is better)**
 
@@ -110,3 +117,6 @@ esp32s3 rev 2, 240 MHz, ESP-IDF v6.1
 | 2026-09-28 `e52885f38` pie: mismatch in assembly (SSA8L/SRC funnel shift for unalig | pie | 724 | 585 | 715 | 415 | 21.8 | 39.9 |
 | 2026-09-28 `d5eacf2bb` bench: count_byte and ascii_prefix on short lines | pie | 724 | 584 | 715 | 415 | 21.8 | 39.9 |
 | 2026-09-28 `7b638d567` pie: count_byte and ascii_prefix in assembly; PIE kernels in | pie | 724 | 963 | 716 | 415 | 21.8 | 39.9 |
+| 2026-09-29 `6a5616b78` faf_ring: 32-bit capacity check only where size_t is wider ( | pie | 724 | 963 | 716 | 411 | 21.8 | 39.9 |
+| 2026-09-29 `cf5a35fb4` ESP32_DEFINES: extra definitions for the board apps; bench h | pie | 724 | 963 | 716 | 411 | 21.8 | 39.9 |
+| 2026-09-29 `cf5a35fb4` ESP32_DEFINES: extra definitions for the board apps; bench h | pie, arenas off | 725 | 963 | 715 | 411 | 21.8 | 39.9 |

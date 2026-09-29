@@ -58,11 +58,12 @@ are not detected as stale: release them first.
 **Turning arenas off.** Build with `-DFAF_ARENAS=0` and there is only the
 default arena: the `faf_arena_*` functions aren't declared, region handles are
 4 bytes instead of 16, and pool sizes are compile-time constants again. On the
-ESP32-S3, arenas cost region operations 2-7% (acquire + reserve + release
-525 -> 560 ns), from the extra load through the handle and sizes that are no
-longer immediates; with them off the allocator compiles to what it was before
-arenas (one extra instruction in `faf_reserve`). `make check_no_arenas` runs
-the tests in that configuration.
+ESP32 and ESP32-S3 that makes acquire + release 10-18% faster and everything
+that allocates from regions about 2% faster (same commit, same board, only
+the flag changed); kernels and rings are unaffected. The allocator then
+compiles to what it was before arenas (one extra instruction in
+`faf_reserve`). `make check_no_arenas` runs the tests in that configuration,
+and `make esp32_test ESP32_DEFINES=FAF_ARENAS=0` on a board.
 
 ## Rings
 

@@ -331,7 +331,31 @@ no longer has a constant trip count. Copies of 1 KB were 4% slower in both
 the interleaved and the recorded runs (19.9 -> 20.8 ns), within the Mac's
 noise but consistent. Rows the change can't affect (malloc, libc `strlen`,
 the `ref` kernels) moved by 3-7% in the same run, which sets the noise floor.
-Not yet measured on the boards.
+
+**On the boards, and making it optional.** The S3 (`6a5616b`, against
+`7b638d5`) showed region operations 2-7% slower, but that comparison spanned
+the ring and benchmark commits too, and code placement has moved S3 results
+before (section 4). Two things followed. `FAF_ARENAS=0` (`839a925`) builds
+without arenas: the default arena becomes a `static const` that every handle
+refers to, so the compiler folds its sizes back to the build constants,
+without a second copy of the allocator (on Xtensa at -O2, one extra
+instruction in `faf_reserve` against the pre-arena code). And `ESP32_DEFINES`
+(`cf5a35f`) passes definitions to the board apps, with the setting shown in
+the bench header and in RESULTS.md, so the flag could be tested alone:
+same commit, same board, arenas on vs off.
+
+| `cf5a35f`, on -> off | ESP32 | ESP32-S3 |
+|---|---:|---:|
+| acquire + release, 0 / 3 of 4 held | 334 / 496 -> 288 / 404 ns | 279 / 404 -> 242 / 334 ns |
+| acquire + reserve + release | 648 -> 585 ns | 558 -> 503 ns |
+| `faf_string_copy` + release | 753 -> 737 ns | 701 -> 685 ns |
+| record processing | 7738 -> 7578 ns | 6015 -> 5885 ns |
+| kernels, ring, builder | within 1% | within 1% |
+
+The indirection is the whole cost: acquire/release 10-18%, anything that
+allocates about 2%, nothing else. With arenas off the S3's copy + release is
+684.9 ns, as before arenas. Arenas stay on by default (the bindings need
+them); microcontroller builds can turn them off.
 
 ## Lessons
 

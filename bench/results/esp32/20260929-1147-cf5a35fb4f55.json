@@ -1,0 +1,853 @@
+{
+ "meta": {
+  "chip": "esp32",
+  "revision": "301",
+  "cores": "2",
+  "mhz": "240",
+  "idf": "v6.1",
+  "backend": "swar",
+  "runs": 5,
+  "pools": 4,
+  "slots": 4096,
+  "slot_bytes": 4,
+  "lines": 400,
+  "arenas": "off",
+  "date": "2026-09-29T11:47:22",
+  "commit": "cf5a35fb4f55",
+  "subject": "ESP32_DEFINES: extra definitions for the board apps; bench header and results show the arenas setting",
+  "dirty": false,
+  "command": "make esp32_bench_record IDF_TARGET=esp32 ESP32_DEFINES=\"FAF_ARENAS=0\"",
+  "note": "",
+  "machine": "esp32"
+ },
+ "rows": [
+  {
+   "section": "Record processing",
+   "group": "",
+   "label": "region: acquire ... release",
+   "value": 7577.5,
+   "unit": "ns/op",
+   "failed": false,
+   "note": ""
+  },
+  {
+   "section": "Record processing",
+   "group": "",
+   "label": "malloc: strdup/strsep/malloc ... free",
+   "value": 64012.5,
+   "unit": "ns/op",
+   "failed": false,
+   "note": ""
+  },
+  {
+   "section": "Small copies",
+   "group": "",
+   "label": "region: faf_string_copy + release",
+   "value": 737.0,
+   "unit": "ns/op",
+   "failed": false,
+   "note": ""
+  },
+  {
+   "section": "Small copies",
+   "group": "",
+   "label": "malloc: malloc + memcpy + free",
+   "value": 12809.9,
+   "unit": "ns/op",
+   "failed": false,
+   "note": ""
+  },
+  {
+   "section": "Splitting a line",
+   "group": "",
+   "label": "split (array of views)",
+   "value": 4357.5,
+   "unit": "ns/op",
+   "failed": false,
+   "note": ""
+  },
+  {
+   "section": "Splitting a line",
+   "group": "",
+   "label": "next_token iterator (no allocation)",
+   "value": 5810.0,
+   "unit": "ns/op",
+   "failed": false,
+   "note": ""
+  },
+  {
+   "section": "Splitting a line",
+   "group": "",
+   "label": "faf_tokens iterator (batched)",
+   "value": 5092.5,
+   "unit": "ns/op",
+   "failed": false,
+   "note": ""
+  },
+  {
+   "section": "Splitting a line",
+   "group": "",
+   "label": "same iterator on libc memchr",
+   "value": 5415.0,
+   "unit": "ns/op",
+   "failed": false,
+   "note": ""
+  },
+  {
+   "section": "Splitting a line",
+   "group": "",
+   "label": "split_owned (copy + NUL terminated)",
+   "value": 5170.0,
+   "unit": "ns/op",
+   "failed": false,
+   "note": ""
+  },
+  {
+   "section": "Per-line scratch buffer",
+   "group": "",
+   "label": "region: acquire + reserve + release",
+   "value": 585.0,
+   "unit": "ns/op",
+   "failed": false,
+   "note": ""
+  },
+  {
+   "section": "Per-line scratch buffer",
+   "group": "",
+   "label": "malloc + free",
+   "value": 13082.5,
+   "unit": "ns/op",
+   "failed": false,
+   "note": ""
+  },
+  {
+   "section": "Size sweep",
+   "group": "8 bytes, batches of 64",
+   "label": "region: faf_string_copy",
+   "value": 692.3,
+   "unit": "ns/op",
+   "failed": false,
+   "note": ""
+  },
+  {
+   "section": "Size sweep",
+   "group": "8 bytes, batches of 64",
+   "label": "bump arena: memcpy",
+   "value": 355.3,
+   "unit": "ns/op",
+   "failed": false,
+   "note": ""
+  },
+  {
+   "section": "Size sweep",
+   "group": "8 bytes, batches of 64",
+   "label": "malloc + memcpy + free",
+   "value": 12590.2,
+   "unit": "ns/op",
+   "failed": false,
+   "note": ""
+  },
+  {
+   "section": "Size sweep",
+   "group": "16 bytes, batches of 64",
+   "label": "region: faf_string_copy",
+   "value": 704.7,
+   "unit": "ns/op",
+   "failed": false,
+   "note": ""
+  },
+  {
+   "section": "Size sweep",
+   "group": "16 bytes, batches of 64",
+   "label": "bump arena: memcpy",
+   "value": 367.8,
+   "unit": "ns/op",
+   "failed": false,
+   "note": ""
+  },
+  {
+   "section": "Size sweep",
+   "group": "16 bytes, batches of 64",
+   "label": "malloc + memcpy + free",
+   "value": 12746.2,
+   "unit": "ns/op",
+   "failed": false,
+   "note": ""
+  },
+  {
+   "section": "Size sweep",
+   "group": "32 bytes, batches of 64",
+   "label": "region: faf_string_copy",
+   "value": 701.0,
+   "unit": "ns/op",
+   "failed": false,
+   "note": ""
+  },
+  {
+   "section": "Size sweep",
+   "group": "32 bytes, batches of 64",
+   "label": "bump arena: memcpy",
+   "value": 392.8,
+   "unit": "ns/op",
+   "failed": false,
+   "note": ""
+  },
+  {
+   "section": "Size sweep",
+   "group": "32 bytes, batches of 64",
+   "label": "malloc + memcpy + free",
+   "value": 13269.5,
+   "unit": "ns/op",
+   "failed": false,
+   "note": ""
+  },
+  {
+   "section": "Size sweep",
+   "group": "64 bytes, batches of 64",
+   "label": "region: faf_string_copy",
+   "value": 788.1,
+   "unit": "ns/op",
+   "failed": false,
+   "note": ""
+  },
+  {
+   "section": "Size sweep",
+   "group": "64 bytes, batches of 64",
+   "label": "bump arena: memcpy",
+   "value": 480.3,
+   "unit": "ns/op",
+   "failed": false,
+   "note": ""
+  },
+  {
+   "section": "Size sweep",
+   "group": "64 bytes, batches of 64",
+   "label": "malloc + memcpy + free",
+   "value": 13507.5,
+   "unit": "ns/op",
+   "failed": false,
+   "note": ""
+  },
+  {
+   "section": "Size sweep",
+   "group": "256 bytes, batches of 64",
+   "label": "region: faf_string_copy",
+   "value": 1288.4,
+   "unit": "ns/op",
+   "failed": false,
+   "note": ""
+  },
+  {
+   "section": "Size sweep",
+   "group": "256 bytes, batches of 64",
+   "label": "bump arena: memcpy",
+   "value": 980.5,
+   "unit": "ns/op",
+   "failed": false,
+   "note": ""
+  },
+  {
+   "section": "Size sweep",
+   "group": "256 bytes, batches of 64",
+   "label": "malloc + memcpy + free",
+   "value": 14771.6,
+   "unit": "ns/op",
+   "failed": false,
+   "note": ""
+  },
+  {
+   "section": "Size sweep",
+   "group": "1024 bytes, batches of 16",
+   "label": "region: faf_string_copy",
+   "value": 3302.5,
+   "unit": "ns/op",
+   "failed": false,
+   "note": ""
+  },
+  {
+   "section": "Size sweep",
+   "group": "1024 bytes, batches of 16",
+   "label": "bump arena: memcpy",
+   "value": 2984.7,
+   "unit": "ns/op",
+   "failed": false,
+   "note": ""
+  },
+  {
+   "section": "Size sweep",
+   "group": "1024 bytes, batches of 16",
+   "label": "malloc + memcpy + free",
+   "value": 16698.0,
+   "unit": "ns/op",
+   "failed": false,
+   "note": ""
+  },
+  {
+   "section": "Size sweep",
+   "group": "4096 bytes, batches of 4",
+   "label": "region: faf_string_copy",
+   "value": 11359.0,
+   "unit": "ns/op",
+   "failed": false,
+   "note": ""
+  },
+  {
+   "section": "Size sweep",
+   "group": "4096 bytes, batches of 4",
+   "label": "bump arena: memcpy",
+   "value": 11000.5,
+   "unit": "ns/op",
+   "failed": false,
+   "note": ""
+  },
+  {
+   "section": "Size sweep",
+   "group": "4096 bytes, batches of 4",
+   "label": "malloc + memcpy + free",
+   "value": 25225.2,
+   "unit": "ns/op",
+   "failed": false,
+   "note": ""
+  },
+  {
+   "section": "Region overhead",
+   "group": "",
+   "label": "acquire + release, 0 of 4 held",
+   "value": 287.6,
+   "unit": "ns/op",
+   "failed": false,
+   "note": ""
+  },
+  {
+   "section": "Region overhead",
+   "group": "",
+   "label": "acquire + release, 2 of 4 held",
+   "value": 396.1,
+   "unit": "ns/op",
+   "failed": false,
+   "note": ""
+  },
+  {
+   "section": "Region overhead",
+   "group": "",
+   "label": "acquire + release, 3 of 4 held",
+   "value": 404.4,
+   "unit": "ns/op",
+   "failed": false,
+   "note": ""
+  },
+  {
+   "section": "Region overhead",
+   "group": "",
+   "label": "for scale: malloc(16) + free",
+   "value": 8728.5,
+   "unit": "ns/op",
+   "failed": false,
+   "note": ""
+  },
+  {
+   "section": "Churn",
+   "group": "64 live strings",
+   "label": "region, compact when full",
+   "value": 6838.1,
+   "unit": "ns/op",
+   "failed": false,
+   "note": "peak 18.0 KB, 39 compactions (2496 copies)"
+  },
+  {
+   "section": "Churn",
+   "group": "64 live strings",
+   "label": "malloc + free",
+   "value": 37648.8,
+   "unit": "ns/op",
+   "failed": false,
+   "note": "peak 2.0 KB requested"
+  },
+  {
+   "section": "Churn",
+   "group": "256 live strings",
+   "label": "region, compact when full",
+   "value": 7290.3,
+   "unit": "ns/op",
+   "failed": false,
+   "note": "peak 23.6 KB, 64 compactions (16384 copies)"
+  },
+  {
+   "section": "Churn",
+   "group": "256 live strings",
+   "label": "malloc + free",
+   "value": 37764.0,
+   "unit": "ns/op",
+   "failed": false,
+   "note": "peak 7.3 KB requested"
+  },
+  {
+   "section": "Churn",
+   "group": "512 live strings",
+   "label": "region, compact when full",
+   "value": 12747.2,
+   "unit": "ns/op",
+   "failed": false,
+   "note": "peak 30.9 KB, 364 compactions (186368 copies)"
+  },
+  {
+   "section": "Churn",
+   "group": "512 live strings",
+   "label": "malloc + free",
+   "value": 42996.5,
+   "unit": "ns/op",
+   "failed": false,
+   "note": "peak 14.3 KB requested"
+  },
+  {
+   "section": "Growth",
+   "group": "1-byte appends",
+   "label": "faf_builder",
+   "value": 703672.0,
+   "unit": "ns/op",
+   "failed": false,
+   "note": "region used: 3.9 KB"
+  },
+  {
+   "section": "Growth",
+   "group": "1-byte appends",
+   "label": "faf_builder, interleaved",
+   "value": 655372.0,
+   "unit": "ns/op",
+   "failed": false,
+   "note": "region used: 7.6 KB"
+  },
+  {
+   "section": "Growth",
+   "group": "1-byte appends",
+   "label": "realloc, doubling",
+   "value": 502148.0,
+   "unit": "ns/op",
+   "failed": false,
+   "note": ""
+  },
+  {
+   "section": "Growth",
+   "group": "1-byte appends",
+   "label": "open_memstream",
+   "value": 28221666.0,
+   "unit": "ns/op",
+   "failed": false,
+   "note": ""
+  },
+  {
+   "section": "Growth",
+   "group": "1-byte appends",
+   "label": "malloc final size up front",
+   "value": 396748.0,
+   "unit": "ns/op",
+   "failed": false,
+   "note": ""
+  },
+  {
+   "section": "Growth",
+   "group": "16-byte appends",
+   "label": "faf_builder",
+   "value": 111206.0,
+   "unit": "ns/op",
+   "failed": false,
+   "note": "region used: 3.9 KB"
+  },
+  {
+   "section": "Growth",
+   "group": "16-byte appends",
+   "label": "faf_builder, interleaved",
+   "value": 124870.0,
+   "unit": "ns/op",
+   "failed": false,
+   "note": "region used: 9.7 KB"
+  },
+  {
+   "section": "Growth",
+   "group": "16-byte appends",
+   "label": "realloc, doubling",
+   "value": 114446.0,
+   "unit": "ns/op",
+   "failed": false,
+   "note": ""
+  },
+  {
+   "section": "Growth",
+   "group": "16-byte appends",
+   "label": "open_memstream",
+   "value": 2796412.0,
+   "unit": "ns/op",
+   "failed": false,
+   "note": ""
+  },
+  {
+   "section": "Growth",
+   "group": "16-byte appends",
+   "label": "malloc final size up front",
+   "value": 72624.0,
+   "unit": "ns/op",
+   "failed": false,
+   "note": ""
+  },
+  {
+   "section": "Growth",
+   "group": "1 KB appends",
+   "label": "faf_builder",
+   "value": 14768.0,
+   "unit": "ns/op",
+   "failed": false,
+   "note": "region used: 3.9 KB"
+  },
+  {
+   "section": "Growth",
+   "group": "1 KB appends",
+   "label": "faf_builder, interleaved",
+   "value": 24646.0,
+   "unit": "ns/op",
+   "failed": false,
+   "note": "region used: 7.0 KB"
+  },
+  {
+   "section": "Growth",
+   "group": "1 KB appends",
+   "label": "realloc, doubling",
+   "value": 40688.0,
+   "unit": "ns/op",
+   "failed": false,
+   "note": ""
+  },
+  {
+   "section": "Growth",
+   "group": "1 KB appends",
+   "label": "open_memstream",
+   "value": 1057562.0,
+   "unit": "ns/op",
+   "failed": false,
+   "note": ""
+  },
+  {
+   "section": "Growth",
+   "group": "1 KB appends",
+   "label": "malloc final size up front",
+   "value": 24446.0,
+   "unit": "ns/op",
+   "failed": false,
+   "note": ""
+  },
+  {
+   "section": "Recent lines",
+   "group": "",
+   "label": "ring, 4 KB buffer",
+   "value": 1373.2,
+   "unit": "ns/op",
+   "failed": false,
+   "note": "19968 of 19968 reads still there"
+  },
+  {
+   "section": "Recent lines",
+   "group": "",
+   "label": "malloc: strdup + free",
+   "value": 19386.5,
+   "unit": "ns/op",
+   "failed": false,
+   "note": "64 lines kept, peak 7.2 KB requested"
+  },
+  {
+   "section": "Kernels on short lines",
+   "group": "find_byte (absent)",
+   "label": "faf",
+   "value": 1427.5,
+   "unit": "ns/op",
+   "failed": false,
+   "note": ""
+  },
+  {
+   "section": "Kernels on short lines",
+   "group": "find_byte (absent)",
+   "label": "ref",
+   "value": 2892.5,
+   "unit": "ns/op",
+   "failed": false,
+   "note": ""
+  },
+  {
+   "section": "Kernels on short lines",
+   "group": "find_byte (absent)",
+   "label": "libc memchr",
+   "value": 4310.0,
+   "unit": "ns/op",
+   "failed": false,
+   "note": ""
+  },
+  {
+   "section": "Kernels on short lines",
+   "group": "find_bytes ',' (all ~7 per line)",
+   "label": "faf",
+   "value": 2917.5,
+   "unit": "ns/op",
+   "failed": false,
+   "note": ""
+  },
+  {
+   "section": "Kernels on short lines",
+   "group": "find_bytes ',' (all ~7 per line)",
+   "label": "ref",
+   "value": 6542.5,
+   "unit": "ns/op",
+   "failed": false,
+   "note": ""
+  },
+  {
+   "section": "Kernels on short lines",
+   "group": "strlen",
+   "label": "faf",
+   "value": 1322.5,
+   "unit": "ns/op",
+   "failed": false,
+   "note": ""
+  },
+  {
+   "section": "Kernels on short lines",
+   "group": "strlen",
+   "label": "ref",
+   "value": 4132.5,
+   "unit": "ns/op",
+   "failed": false,
+   "note": ""
+  },
+  {
+   "section": "Kernels on short lines",
+   "group": "strlen",
+   "label": "libc strlen",
+   "value": 1022.5,
+   "unit": "ns/op",
+   "failed": false,
+   "note": ""
+  },
+  {
+   "section": "Kernels on short lines",
+   "group": "mismatch (equal)",
+   "label": "faf",
+   "value": 2105.0,
+   "unit": "ns/op",
+   "failed": false,
+   "note": ""
+  },
+  {
+   "section": "Kernels on short lines",
+   "group": "mismatch (equal)",
+   "label": "ref",
+   "value": 3822.5,
+   "unit": "ns/op",
+   "failed": false,
+   "note": ""
+  },
+  {
+   "section": "Kernels on short lines",
+   "group": "mismatch (equal)",
+   "label": "libc memcmp",
+   "value": 7497.5,
+   "unit": "ns/op",
+   "failed": false,
+   "note": ""
+  },
+  {
+   "section": "Kernels on short lines",
+   "group": "count_byte ','",
+   "label": "faf",
+   "value": 2217.5,
+   "unit": "ns/op",
+   "failed": false,
+   "note": ""
+  },
+  {
+   "section": "Kernels on short lines",
+   "group": "count_byte ','",
+   "label": "ref",
+   "value": 5620.0,
+   "unit": "ns/op",
+   "failed": false,
+   "note": ""
+  },
+  {
+   "section": "Kernels on short lines",
+   "group": "ascii_prefix (all ascii)",
+   "label": "faf",
+   "value": 1397.5,
+   "unit": "ns/op",
+   "failed": false,
+   "note": ""
+  },
+  {
+   "section": "Kernels on short lines",
+   "group": "ascii_prefix (all ascii)",
+   "label": "ref",
+   "value": 2882.5,
+   "unit": "ns/op",
+   "failed": false,
+   "note": ""
+  },
+  {
+   "section": "Kernel throughput",
+   "group": "find_byte (absent)",
+   "label": "faf",
+   "value": 100.6,
+   "unit": "MB/s",
+   "failed": false,
+   "note": ""
+  },
+  {
+   "section": "Kernel throughput",
+   "group": "find_byte (absent)",
+   "label": "ref",
+   "value": 39.9,
+   "unit": "MB/s",
+   "failed": false,
+   "note": ""
+  },
+  {
+   "section": "Kernel throughput",
+   "group": "find_byte (absent)",
+   "label": "libc memchr",
+   "value": 26.6,
+   "unit": "MB/s",
+   "failed": false,
+   "note": ""
+  },
+  {
+   "section": "Kernel throughput",
+   "group": "count_byte",
+   "label": "faf",
+   "value": 56.3,
+   "unit": "MB/s",
+   "failed": false,
+   "note": ""
+  },
+  {
+   "section": "Kernel throughput",
+   "group": "count_byte",
+   "label": "ref",
+   "value": 20.0,
+   "unit": "MB/s",
+   "failed": false,
+   "note": ""
+  },
+  {
+   "section": "Kernel throughput",
+   "group": "count_byte",
+   "label": "libc memchr loop",
+   "value": 24.5,
+   "unit": "MB/s",
+   "failed": false,
+   "note": ""
+  },
+  {
+   "section": "Kernel throughput",
+   "group": "strlen",
+   "label": "faf",
+   "value": 119.2,
+   "unit": "MB/s",
+   "failed": false,
+   "note": ""
+  },
+  {
+   "section": "Kernel throughput",
+   "group": "strlen",
+   "label": "libc strlen",
+   "value": 136.6,
+   "unit": "MB/s",
+   "failed": false,
+   "note": ""
+  },
+  {
+   "section": "Kernel throughput",
+   "group": "mismatch (equal)",
+   "label": "faf",
+   "value": 59.9,
+   "unit": "MB/s",
+   "failed": false,
+   "note": ""
+  },
+  {
+   "section": "Kernel throughput",
+   "group": "mismatch (equal)",
+   "label": "ref",
+   "value": 30.0,
+   "unit": "MB/s",
+   "failed": false,
+   "note": ""
+  },
+  {
+   "section": "Kernel throughput",
+   "group": "mismatch (equal)",
+   "label": "libc memcmp",
+   "value": 15.0,
+   "unit": "MB/s",
+   "failed": false,
+   "note": ""
+  },
+  {
+   "section": "Kernel throughput",
+   "group": "find_set whitespace",
+   "label": "faf",
+   "value": 19.2,
+   "unit": "MB/s",
+   "failed": false,
+   "note": ""
+  },
+  {
+   "section": "Kernel throughput",
+   "group": "find_set whitespace",
+   "label": "ref",
+   "value": 18.4,
+   "unit": "MB/s",
+   "failed": false,
+   "note": ""
+  },
+  {
+   "section": "Kernel throughput",
+   "group": "find_set whitespace",
+   "label": "libc strcspn",
+   "value": 3.3,
+   "unit": "MB/s",
+   "failed": false,
+   "note": ""
+  },
+  {
+   "section": "Kernel throughput",
+   "group": "ascii_case lower",
+   "label": "faf",
+   "value": 38.3,
+   "unit": "MB/s",
+   "failed": false,
+   "note": ""
+  },
+  {
+   "section": "Kernel throughput",
+   "group": "ascii_case lower",
+   "label": "ref",
+   "value": 9.7,
+   "unit": "MB/s",
+   "failed": false,
+   "note": ""
+  },
+  {
+   "section": "Kernel throughput",
+   "group": "utf8_valid (ascii)",
+   "label": "faf",
+   "value": 95.5,
+   "unit": "MB/s",
+   "failed": false,
+   "note": ""
+  },
+  {
+   "section": "Kernel throughput",
+   "group": "hash",
+   "label": "scalar",
+   "value": 8.7,
+   "unit": "MB/s",
+   "failed": false,
+   "note": ""
+  }
+ ]
+}
