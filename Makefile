@@ -41,14 +41,7 @@ INCLUDES = -I$(SRC_DIR)
 vpath %.c $(SRC_DIR) $(KERNEL_DIR) $(TEST_DIR) $(TOOLS_DIR)
 
 # Library
-LIB_SRCS = $(KERNEL_DIR)/faf_kernels_ref.c $(KERNEL_DIR)/faf_kernels_simd.c \
-           $(KERNEL_DIR)/faf_kernels_swar.c \
-           $(addprefix $(SRC_DIR)/, \
-             faf_string.c faf_string_strlen.c faf_string_mem.c \
-             faf_string_cmp.c faf_string_concat.c faf_string_strsplit.c \
-             faf_string_case.c faf_string_search.c faf_string_view.c \
-             faf_string_build.c faf_string_parse.c faf_string_hash.c \
-             faf_string_sort.c)
+LIB_SRCS = $(wildcard $(SRC_DIR)/*.c $(KERNEL_DIR)/*.c)
 LIB_HEADERS = $(wildcard $(SRC_DIR)/*.h $(KERNEL_DIR)/*.h)
 LIB_OBJS = $(patsubst %.c,$(OBJ_DIR)/%.o,$(notdir $(LIB_SRCS)))
 LIB = $(OBJ_DIR)/libfaf.a

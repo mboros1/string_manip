@@ -12,6 +12,7 @@
 #include "faf_string_hash.h"
 #include "faf_string_mem.h"
 #include "faf_string_parse.h"
+#include "faf_string_ring.h"
 #include "faf_string_search.h"
 #include "faf_string_sort.h"
 #include "faf_string_strlen.h"
