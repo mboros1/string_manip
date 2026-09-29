@@ -22,7 +22,7 @@ file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/test_list.h "${TEST_LIST}")
 # skip themselves (TEST_REQUIRE).
 target_compile_definitions(${COMPONENT_LIB} PRIVATE FAF_NPOOLS=4 FAF_POOL_SLOTS=2048)
 
-# Extra definitions: idf.py -DFAF_DEFINES="FAF_ARENAS=0" (tools/esp32_run.py,
+# Extra definitions: idf.py -DFAF_DEFINES="FAF_NPOOLS=2" (tools/esp32_run.py,
 # make ESP32_DEFINES=...)
 if(FAF_DEFINES)
   separate_arguments(FAF_DEFINE_LIST UNIX_COMMAND "${FAF_DEFINES}")

@@ -346,48 +346,6 @@ static void test_inplace(void) {
   ASSERT_TRUE(outside > 0, "test needs bytes outside the views");
 }
 
-#if FAF_ARENAS
-static void test_ffi_arena(void) {
-  void *arena = malloc(faf_ffi_arena_size());
-  size_t need = faf_ffi_arena_bytes(3, 100);
-  ASSERT_TRUE(need > 300 && need <= SPLIT_BYTES, "arena bytes");
-  ASSERT_TRUE(faf_ffi_arena_init(arena, split_buf + 1, need, 3), "init at need");
-  ASSERT_TRUE(faf_ffi_region_capacity(arena) >= 100, "pools hold pool_bytes");
-  const size_t nbytes = 1024;
-  char *buf = split_buf; // SPLIT_BYTES of heap
-  ASSERT_TRUE(faf_ffi_arena_init(arena, buf, nbytes, 2), "arena init");
-  ASSERT_TRUE(!faf_ffi_arena_init(arena, buf, 4, 2), "tiny arena accepted");
-  ASSERT_TRUE(faf_ffi_arena_init(arena, buf, nbytes, 2), "arena re-init");
-
-  uint64_t a = faf_ffi_region_acquire(arena), b = faf_ffi_region_acquire(arena);
-  ASSERT_TRUE(a && b && a != b, "two regions");
-  ASSERT_TRUE(faf_ffi_region_acquire(arena) == 0, "third region from two pools");
-  size_t cap = faf_ffi_region_capacity(arena);
-  ASSERT_TRUE(cap > 0 && cap <= nbytes / 2, "capacity");
-
-  ASSERT_TRUE(faf_ffi_reserve(arena, a, cap + 1) == NULL, "reserved past capacity");
-  char *p = faf_ffi_reserve(arena, a, cap);
-  ASSERT_TRUE(p >= buf && p + cap <= buf + nbytes, "region memory in the buffer");
-  ASSERT_TRUE((uintptr_t)p % FAF_SLOT_BYTES == 0, "slot aligned");
-  memset(p, 'x', cap);
-  ASSERT_TRUE(faf_ffi_reserve(arena, a, 1) == NULL, "full region reserved more");
-  char *q = faf_ffi_reserve(arena, b, 10);
-  ASSERT_TRUE(q && (q + 10 <= p || q >= p + cap), "regions overlap");
-
-  faf_ffi_region_release(arena, a);
-  ASSERT_TRUE(faf_ffi_reserve(arena, a, 1) == NULL, "stale handle reserved");
-  uint64_t c = faf_ffi_region_acquire(arena);
-  ASSERT_TRUE(c && c != a, "reacquired region has a new handle");
-  faf_ffi_region_release(arena, a); // stale: must not free c
-  ASSERT_TRUE(faf_ffi_reserve(arena, c, cap) != NULL, "stale release freed the owner");
-  faf_ffi_region_release(arena, 0); // ignored
-  faf_ffi_region_release(arena, b);
-  faf_ffi_region_release(arena, c);
-  ASSERT_TRUE(faf_ffi_region_acquire(arena) != 0, "released regions reusable");
-  free(arena);
-}
-#endif
-
 static test_case_t batch_tests[] = {
     {"split_cases", test_split_cases},
     {"split_random", test_split_random},
@@ -400,9 +358,6 @@ static test_case_t batch_tests[] = {
     {"high_bytes", test_high_bytes},
     {"span_modes", test_span_modes},
     {"inplace", test_inplace},
-#if FAF_ARENAS
-    {"ffi_arena", test_ffi_arena},
-#endif
 };
 
 static void batch_setup(void) {

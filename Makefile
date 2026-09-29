@@ -150,12 +150,6 @@ check_small:
 	$(MAKE) OBJ_DIR=$(OBJ_DIR)/small BIN_DIR=$(BIN_DIR)/small \
 		EXTRA_FLAGS="$(EXTRA_FLAGS) $(SMALL_POOLS)" all_tests
 
-# Run the tests again without arenas over caller memory: only the default
-# arena, with constant sizes (FAF_ARENAS=0, see docs/memory.md).
-check_no_arenas:
-	$(MAKE) OBJ_DIR=$(OBJ_DIR)/noarenas BIN_DIR=$(BIN_DIR)/noarenas \
-		EXTRA_FLAGS="$(EXTRA_FLAGS) -DFAF_ARENAS=0" all_tests
-
 # Build the tests (or benchmarks) for an ESP32, flash them and collect the
 # output over serial (tests/esp32/, bench/esp32/, tools/esp32_run.py). Needs
 # ESP-IDF; IDF_TARGET picks the chip (esp32, esp32s3, ...) and ESPPORT the
@@ -163,7 +157,7 @@ check_no_arenas:
 IDF_PATH ?= $(HOME)/esp/esp-idf-v6.1
 IDF_TARGET ?= esp32
 ESPPORT ?=
-# Extra compile definitions for the board apps, e.g. ESP32_DEFINES=FAF_ARENAS=0
+# Extra compile definitions for the board apps, e.g. ESP32_DEFINES=FAF_NPOOLS=2
 ESP32_DEFINES ?=
 ESP32_RUN = bash -c '. "$(IDF_PATH)/export.sh" >/dev/null && \
 	python tools/esp32_run.py --target $(IDF_TARGET) \
@@ -237,7 +231,7 @@ clean:
 -include $(wildcard $(OBJ_DIR)/*.d)
 
 .PHONY: all clean all_tests test test_framework test_explorer config bench shared \
-        check_backends check_small check_no_arenas check_freestanding esp32_test esp32_bench \
+        check_backends check_small check_freestanding esp32_test esp32_bench \
         esp32_bench_record bench_record bench_report \
         generate_random_strings \
         $(UTIL_TARGETS)

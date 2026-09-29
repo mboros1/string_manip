@@ -26,7 +26,7 @@ if(DEFINED FAF_BENCH_GROUPS)
                              FAF_BENCH_GROUPS="${FAF_BENCH_GROUPS}")
 endif()
 
-# Extra definitions: idf.py -DFAF_DEFINES="FAF_ARENAS=0" (tools/esp32_run.py,
+# Extra definitions: idf.py -DFAF_DEFINES="FAF_NPOOLS=2" (tools/esp32_run.py,
 # make ESP32_DEFINES=...)
 if(FAF_DEFINES)
   separate_arguments(FAF_DEFINE_LIST UNIX_COMMAND "${FAF_DEFINES}")

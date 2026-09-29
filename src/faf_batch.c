@@ -200,55 +200,6 @@ void faf_batch_ascii_case_inplace(char *data, const int64_t *starts,
                      (size_t)(ends[i] - starts[i]), upper != 0);
 }
 
-/* ---- Memory for results ---- */
-
-#if FAF_ARENAS
-
-// A region handle as an integer: pool + 1 in the low 16 bits (so 0 is none),
-// the generation above.
-static inline uint64_t handle_of(faf_region r) {
-  return faf_region_valid(r) ? ((uint64_t)r.gen << 16) | (uint64_t)(r.pool + 1)
-                             : 0;
-}
-
-static inline faf_region region_of(void *arena, uint64_t h) {
-  if ((h & 0xFFFF) == 0)
-    return FAF_REGION_NONE;
-  return (faf_region){.arena = (faf_arena *)arena,
-                      .pool = (uint16_t)((h & 0xFFFF) - 1),
-                      .gen = (uint16_t)(h >> 16)};
-}
-
-size_t faf_ffi_arena_size(void) { return sizeof(faf_arena); }
-
-size_t faf_ffi_arena_bytes(size_t npools, size_t pool_bytes) {
-  return faf_arena_bytes(npools, (pool_bytes + FAF_SLOT_BYTES - 1) / FAF_SLOT_BYTES);
-}
-
-bool faf_ffi_arena_init(void *arena, void *buf, size_t nbytes, size_t npools) {
-  return faf_arena_init((faf_arena *)arena, buf, nbytes, npools);
-}
-
-uint64_t faf_ffi_region_acquire(void *arena) {
-  return handle_of(faf_arena_acquire((faf_arena *)arena));
-}
-
-size_t faf_ffi_region_capacity(void *arena) {
-  return ((faf_arena *)arena)->pool_slots * FAF_SLOT_BYTES;
-}
-
-void *faf_ffi_reserve(void *arena, uint64_t region, size_t bytes) {
-  size_t slots = (bytes + FAF_SLOT_BYTES - 1) / FAF_SLOT_BYTES;
-  faf_span sp = faf_reserve(region_of(arena, region), slots ? slots : 1);
-  return sp.ptr;
-}
-
-void faf_ffi_region_release(void *arena, uint64_t region) {
-  faf_region_release(region_of(arena, region));
-}
-
-#endif // FAF_ARENAS
-
 int64_t faf_batch_join(const char *data, const int64_t *starts,
                        const int64_t *ends, size_t n, const char *sep,
                        size_t sep_len, char *dst) {

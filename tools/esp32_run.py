@@ -84,7 +84,7 @@ def main():
     parser.add_argument("--groups", default="",
                         help="bench only: space-separated groups (default: all)")
     parser.add_argument("--defines", default="",
-                        help="extra compile definitions, e.g. 'FAF_ARENAS=0'")
+                        help="extra compile definitions, e.g. 'FAF_NPOOLS=2'")
     parser.add_argument("--no-flash", action="store_true",
                         help="run what is already on the board")
     args = parser.parse_args()

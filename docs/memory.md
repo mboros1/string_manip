@@ -5,7 +5,7 @@ slots over one block of memory. The default arena is static storage, sized at
 build time; others can be laid over any memory you provide, sized at run time.
 
 - **Regions.** A region is one pool. `faf_region_acquire` takes a free pool of
-  the default arena (`faf_arena_acquire(&a)` of another one), allocations bump
+  the default arena (`faf_arena_acquire(a)` of another one), allocations bump
   through it, and `faf_region_release` frees everything in it at once. Handles
   carry their arena and a generation number, so a released region can't be
   used by mistake. Functions that allocate return `FAF_STRING_NONE` when the
@@ -33,9 +33,10 @@ runs the suite with 2 × 1 KB pools.
 
 ```c
 static char buf[1 << 20];
-faf_arena a;
-faf_arena_init(&a, buf, sizeof buf, 8);   // 8 pools, ~128 KB each
-faf_region r = faf_arena_acquire(&a);
+static _Alignas(16) char arena_mem[16];  // >= faf_arena_size() bytes
+faf_arena *a = (faf_arena *)arena_mem;
+faf_arena_init(a, buf, sizeof buf, 8);   // 8 pools, ~128 KB each
+faf_region r = faf_arena_acquire(a);
 faf_string s = faf_string_to_lower(r, line);
 ...
 faf_region_release(r);
@@ -55,24 +56,12 @@ so it belongs to one thread too.
 Re-initializing an arena resets its generations, so handles from before it
 are not detected as stale: release them first.
 
-**Turning arenas off.** Arenas are on by default everywhere, including
-microcontrollers: an arena over a `static` buffer is still static memory, and
-it is the way to give each task of multi-task firmware (FreeRTOS, both cores
-of an ESP32) its own pools without locks. Turn them off only when one task, or
-one owner, does all the string work. Build with `-DFAF_ARENAS=0` and there is
-only the default arena: the `faf_arena_*` functions aren't declared, region handles are
-4 bytes instead of 16, and pool sizes are compile-time constants again. On the
-ESP32 and ESP32-S3 that makes acquire + release 10-18% faster and everything
-that allocates from regions about 2% faster (same commit, same board, only
-the flag changed); kernels and rings are unaffected. The allocator then
-compiles to what it was before arenas (one extra instruction in
-`faf_reserve`). `make check_no_arenas` runs the tests in that configuration,
-and `make esp32_test ESP32_DEFINES=FAF_ARENAS=0` on a board.
-
-What arenas cost, and when: `faf_arena_init` once; region acquire + release
-once per region lifetime (about 40-90 ns more on the boards, so it adds up
-only when regions are acquired per item); a few cycles per allocation (the
-~2%); nothing for code that doesn't allocate (kernels, views, search, rings).
+Arenas are registered in a table of `FAF_MAX_ARENAS` entries (16 by
+default, the default arena included); `faf_arena_fini` frees an entry. Region
+handles are 64-bit integers naming the table entry, the pool and its
+generation, the same in every build, so a handle from a released region or a
+retired arena is rejected rather than read through. Handles of the default
+arena skip the table, so plain C use costs what it did before arenas.
 
 ## Rings
 

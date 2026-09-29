@@ -126,7 +126,7 @@ static void acquire_release_loop(void) {
   size_t acc = 0;
   for (int i = 0; i < ACQUIRE_OPS; ++i) {
     faf_region r = faf_region_acquire();
-    acc += r.pool;
+    acc += (size_t)r;
     faf_region_release(r);
   }
   sink = acc;

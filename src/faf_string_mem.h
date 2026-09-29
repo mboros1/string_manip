@@ -14,11 +14,10 @@
 // it, which frees everything allocated from it at once in O(1).
 //
 // There is a default arena in static storage (faf_region_acquire), sized at
-// build time. Any number of other arenas can be laid over memory the caller
-// provides (faf_arena_init), sized at run time, unless the library is built
-// with FAF_ARENAS=0: then there is only the default arena, region handles
-// are 4 bytes instead of 16, and pool sizes are compile-time constants, which
-// in-order cores notice (see docs/memory.md).
+// build time. Other arenas can be laid over memory the caller provides
+// (faf_arena_init), sized at run time. Arenas and region handles are opaque
+// and the same in every build, so they can be used across a foreign function
+// interface as they are.
 //
 // Not thread-safe: an arena and its regions belong to one thread at a time.
 // Arenas share nothing, so threads that each use their own never contend.
@@ -66,38 +65,26 @@ typedef struct {
   _Alignas(FAF_SLOT_BYTES) unsigned char bytes[FAF_SLOT_BYTES];
 } faf_slot;
 
-#ifndef FAF_ARENAS
-#define FAF_ARENAS 1
+// Up to FAF_MAX_ARENAS arenas at once, the default one included (arenas are
+// registered in a table, and a region handle names its arena's entry).
+#ifndef FAF_MAX_ARENAS
+#define FAF_MAX_ARENAS 16
 #endif
+_Static_assert(FAF_MAX_ARENAS >= 1 && FAF_MAX_ARENAS <= 256,
+               "FAF_MAX_ARENAS must be in [1, 256]");
 
-struct faf_pool_state; // private to faf_string_mem.c
+// A set of pools over one block of memory. Opaque: the caller provides
+// faf_arena_size() bytes for it (aligned for a pointer) and sets it up with
+// faf_arena_init.
+typedef struct faf_arena faf_arena;
 
-// A set of pools over one block of memory. The fields are private: set them up
-// with faf_arena_init. The struct must stay where it is while regions from it
-// are in use (handles point to it); the memory it manages must outlive it.
-typedef struct {
-  faf_slot *slots;              // npools * pool_slots slots
-  struct faf_pool_state *pools; // npools entries
-  size_t pool_slots;            // slots per pool
-  uint16_t npools;
-} faf_arena;
+// A region: exclusive use of one pool of an arena. An opaque integer that
+// names the arena, the pool and the pool's generation, so a handle used after
+// release (or after its arena is gone) is detected instead of silently
+// aliasing. 0 is never a region.
+typedef uint64_t faf_region;
 
-// Handle to an acquired pool of `arena`. `gen` is the pool's generation at
-// acquire time, so a handle used after release is detected instead of
-// silently aliasing.
-typedef struct {
-#if FAF_ARENAS
-  faf_arena *arena;
-#endif
-  uint16_t pool;
-  uint16_t gen;
-} faf_region;
-
-#if FAF_ARENAS
-#define FAF_REGION_NONE ((faf_region){.arena = NULL, .pool = UINT16_MAX, .gen = 0})
-#else
-#define FAF_REGION_NONE ((faf_region){.pool = UINT16_MAX, .gen = 0})
-#endif
+#define FAF_REGION_NONE ((faf_region)0)
 
 // A contiguous run of reserved slots.
 typedef struct {
@@ -107,27 +94,27 @@ typedef struct {
 
 #define FAF_SPAN_NONE ((faf_span){.ptr = NULL, .slots = 0})
 
-#if FAF_ARENAS
-// Bytes of memory an arena of `npools` pools of `pool_slots` slots needs,
-// including its bookkeeping and alignment slack; 0 if that overflows.
-size_t faf_arena_bytes(size_t npools, size_t pool_slots);
+// Bytes the caller provides for an arena itself (its bookkeeping lives in
+// the buffer given to faf_arena_init).
+size_t faf_arena_size(void);
 
-// Lay an arena of `npools` pools over buf[0, nbytes): the bookkeeping goes at
-// the start, and the rest is split evenly into pools. The arena has no pools
-// in use. Returns false (and leaves *a with no pools, so every acquire fails)
-// if buf is NULL, npools is 0 or at least UINT16_MAX, or nbytes doesn't leave
-// at least one slot per pool.
-//
-// Re-initializing an arena resets its generations: handles from before are
-// not detected as stale. Release them first.
+// Bytes of buffer an arena of `npools` pools of at least `pool_bytes` each
+// needs, bookkeeping and alignment included; 0 if that overflows.
+size_t faf_arena_bytes(size_t npools, size_t pool_bytes);
+
+// Lay an arena of `npools` pools over buf[0, nbytes), in `a`: the bookkeeping
+// goes at the start of buf, and the rest is split evenly into pools. False
+// (and `a` usable for nothing) if a or buf is NULL or misaligned, npools is 0
+// or at least UINT16_MAX, nbytes doesn't leave a slot per pool, or
+// FAF_MAX_ARENAS arenas are already in use.
 bool faf_arena_init(faf_arena *a, void *buf, size_t nbytes, size_t npools);
 
-// The arena in static storage that faf_region_acquire uses.
-faf_arena *faf_arena_default(void);
+// Retire `a`: its handles become invalid (even if a later arena takes its
+// place in the table). Release its regions first; calling it twice is a no-op.
+void faf_arena_fini(faf_arena *a);
 
 // Claim a free pool of `a`. Returns FAF_REGION_NONE when every pool is in use.
 faf_region faf_arena_acquire(faf_arena *a);
-#endif // FAF_ARENAS
 
 // Claim a free pool of the default arena.
 faf_region faf_region_acquire(void);
@@ -253,9 +240,11 @@ static inline void *faf_memset(void *dst, int c, size_t n) {
 
 // True if [p, p + n) lies inside the pools of `a`, i.e. is owned by some
 // region of it. faf_mem_contains asks the same of the default arena.
-#if FAF_ARENAS
 bool faf_arena_contains(const faf_arena *a, const void *p, size_t n);
-#endif
 bool faf_mem_contains(const void *p, size_t n);
+
+// The start of `r`'s memory: where its first reservation went. NULL for an
+// invalid handle. (A region's owner can keep a header there.)
+void *faf_region_base(faf_region r);
 
 #endif // FAF_STRING_MEM_H
