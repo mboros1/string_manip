@@ -35,6 +35,7 @@ Apple M1 Max, Darwin 25.0.0, Apple clang version 17.0.0 (clang-1700.6.4.2)
 | 2026-09-28 `2335dc5de` format: use out-of-line builder appends (inlining them made  | neon | 104 | 313 | 55.0 | 121 |  | 71.4 | 75.8 | 9,868 | 774 |
 | 2026-09-28 `7b7a72194` faf_tokens: batched split iterator, separators found 16 at a | neon | 104 | 314 | 54.7 | 123 | 67.8 | 72.5 | 76.0 | 9,884 | 772 |
 | 2026-09-28 `38bd90fa9` pie: SWAR lead inlined in the same unit, 64-byte chunks, 32- | neon | 103 | 312 | 55.1 | 122 | 67.3 | 72.1 | 75.3 | 9,860 | 794 |
+| 2026-09-28 `73e3bdb3f` bench: recent lines, ring vs strdup/free; ring in the docs | neon | 100 | 304 | 54.6 | 121 | 66.8 | 68.6 | 75.8 | 9,874 | 774 |
 
 **Kernels, MB/s (higher is better)**
 
@@ -44,6 +45,7 @@ Apple M1 Max, Darwin 25.0.0, Apple clang version 17.0.0 (clang-1700.6.4.2)
 | 2026-09-28 `2335dc5de` format: use out-of-line builder appends (inlining them made  | neon | 61,540 | 24,920 | 42,280 | 31,060 | 8,530 | 10,570 |
 | 2026-09-28 `7b7a72194` faf_tokens: batched split iterator, separators found 16 at a | neon | 61,830 | 24,920 | 42,280 | 31,060 | 8,540 | 10,680 |
 | 2026-09-28 `38bd90fa9` pie: SWAR lead inlined in the same unit, 64-byte chunks, 32- | neon | 61,830 | 24,920 | 42,280 | 31,060 | 8,540 | 10,680 |
+| 2026-09-28 `73e3bdb3f` bench: recent lines, ring vs strdup/free; ring in the docs | neon | 61,830 | 24,920 | 42,420 | 30,990 | 8,540 | 10,680 |
 
 ## esp32
 

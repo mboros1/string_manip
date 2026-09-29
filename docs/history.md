@@ -274,6 +274,27 @@ file, `src/kernels/faf_kernels_pie.c`.
 | `faf_tokens` | 4452 ns | 3455 ns |
 | `find_byte` / `count_byte` / `mismatch`, 64 KB | 439 / 584 / 231 MB/s | 724 / 963 / 415 MB/s |
 
+## 7. `faf_ring` (09-29)
+
+The ring-buffer region from the design conversation (section 0), for data
+that is safe to lose (`2af1959`). It stores strings in a caller-provided
+buffer and overwrites the oldest. A handle is `{pos, off, len}` (16 bytes),
+where `pos` is a 64-bit count of all bytes ever written: a string is intact
+while `head - pos <= capacity`, with no generations and no per-entry header.
+A string that doesn't fit before the end of the buffer starts over at the
+beginning, and the skipped tail counts as written, which keeps `head` and the
+buffer offset in step.
+
+Tested against a model that records which push last wrote each byte:
+validity must match it exactly, over random lengths, a buffer size that
+isn't a power of two, and a count starting past 2^32. Two planted bugs (an
+off-by-one in the check, a wrap that doesn't count the skipped tail) both
+fail it.
+
+Keeping recent lines (store one, read the one from 32 steps earlier), M1:
+ring 13.7 ns per step in a fixed 4 KB, `strdup` + `free` 85.8 ns (6.3x
+slower) and 7.5 KB at peak.
+
 ## Lessons
 
 - **On in-order cores, codegen details are the performance.** A taken branch,
