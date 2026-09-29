@@ -472,6 +472,29 @@ memory faster, was checked and is wrong: fresh 33 MB through its pool
 isolation faf's cold lower was the faster one. The benchmark's cold gap is
 not explained yet.
 
+## 12. Results in a faf arena (09-29)
+
+The arenas of section 8 were built for bindings, but the batch API's rule
+("the library never allocates") led the Python shim to a new `bytearray`
+per result, and that allocation became the cost once the kernel was fast.
+Asked what pyarrow does: its pool (mimalloc here) doesn't zero memory and
+keeps what is freed, so its best-of-N runs reuse mapped pages. So the shim
+now does the same with faf's allocator (`aedefe5`). The arena and region
+structs depend on build options and can't cross an FFI, so `faf_batch.h`
+wraps them: the caller allocates `faf_ffi_arena_size()` bytes for the arena,
+`faf_ffi_arena_bytes` sizes its buffer exactly, and a region is an opaque
+integer (pool + 1, generation above it). `faf.Arena` lays one over an
+anonymous mapping (address space until used); each result takes a region
+and a lease that gives it back when the result is collected (under a lock:
+that can happen on any thread); results too big for a region fall back to a
+`bytearray`; `to_arrow` copies out, since pyarrow may outlive the batch.
+Tests plant a lease that never releases and a result that drops its lease;
+both fail them.
+
+`lower()` now equals pyarrow's best-of-N at every length from 32 B, with no
+`out=`. The first call in a fresh process still pays fresh pages; that
+comparison's ~2x gap at 128 B and 4 KB remains unexplained.
+
 ## Lessons
 
 - **On in-order cores, codegen details are the performance.** A taken branch,

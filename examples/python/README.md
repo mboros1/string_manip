@@ -41,6 +41,17 @@ with open("errors.log", "wb") as f:
   without a copy.
 - Bytes are created only by indexing (`b[i]`, iteration, `head`) and by the
   operations that write new strings: `lower`, `upper`, `compact`, `join`.
+- Those results live in a faf arena, the library's own allocator: regions of
+  one large anonymous mapping, taken per result and given back when the
+  result is garbage collected. Later results reuse memory that is already
+  mapped, which costs about a quarter of fresh memory. Results too big for a
+  region (256 MB by default) get a `bytearray`. `faf.use_arena(faf.Arena(...))`
+  sizes it, `faf.use_arena(None)` turns it off, and `out=` writes into a
+  buffer you provide. `join` returns a `bytearray` you keep, and `to_arrow`
+  copies out of the arena, since pyarrow may keep the array longer than the
+  batch lives.
+- `lower(inplace=True)` changes the strings where they are, for batches over
+  a `bytearray` only.
 - `Batch.from_arrow` / `to_arrow` convert pyarrow binary and string arrays
   without copying the bytes (Arrow's offsets are a batch as they are:
   `starts = offsets`, `ends = offsets + 1`). `Batch.from_list` copies a list
