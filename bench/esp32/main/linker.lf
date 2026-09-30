@@ -20,6 +20,7 @@ entries:
     faf_string_view (noflash)
     faf_string_ring (noflash)
     faf_batch (noflash)
+    faf_ctx (noflash)
     faf_kernels_ref (noflash)
     faf_kernels_simd (noflash)
     faf_kernels_swar (noflash)

@@ -1,6 +1,7 @@
 #ifndef FAF_BATCH_H
 #define FAF_BATCH_H
 
+#include "faf_ctx.h"
 #include "faf_string_mem.h"
 
 #include <stddef.h>
@@ -10,15 +11,16 @@
 // C code that works on columns of strings).
 //
 // A batch is views into one byte buffer: string i is data[starts[i], ends[i]).
-// Batches are allocated in a region like anything else, and go away when it
+// Functions that make a batch take a faf_ctx (faf_ctx.h): the batch is
+// allocated in its region `out` like anything else, and goes away when that
 // is released. A batch points into its input (the bytes, the arrays given to
 // from_offsets / from_views, another batch's views), which must outlive it,
 // as for any faf_string. Functions that make a batch return NULL when the
 // region is out of space; a NULL batch reads as empty everywhere.
 //
 // Made for foreign function interfaces: only pointers, integers and the
-// region handle; a pointer may be NULL where its length is 0. Positions and
-// lengths are int64_t, as in Arrow.
+// faf_ctx (a region and a pointer); a pointer may be NULL where its length is
+// 0. Positions and lengths are int64_t, as in Arrow.
 
 typedef struct faf_batch faf_batch;
 
@@ -26,15 +28,16 @@ typedef struct faf_batch faf_batch;
 
 // Split data[0, len) on `sep`, like Python's bytes.split: "a\n\nb" is "a",
 // "", "b"; "" is one empty string; "a\n" ends with an empty string.
-faf_batch *faf_batch_split(faf_region r, const char *data, size_t len, char sep);
+faf_batch *faf_batch_split(const faf_ctx *ctx, const char *data, size_t len,
+                           char sep);
 
 // Arrow's layout: string i is data[offsets[i], offsets[i + 1]), offsets has
 // n + 1 entries. Neither is copied.
-faf_batch *faf_batch_from_offsets(faf_region r, const char *data,
+faf_batch *faf_batch_from_offsets(const faf_ctx *ctx, const char *data,
                                   const int64_t *offsets, size_t n);
 
 // Views the caller already has, in any order. Nothing is copied.
-faf_batch *faf_batch_from_views(faf_region r, const char *data,
+faf_batch *faf_batch_from_views(const faf_ctx *ctx, const char *data,
                                 const int64_t *starts, const int64_t *ends,
                                 size_t n);
 
@@ -77,25 +80,26 @@ size_t faf_batch_eq_icase(const faf_batch *b, const char *other,
 // faf_string_hash_seed of each string.
 void faf_batch_hash(const faf_batch *b, uint64_t seed, uint64_t *out);
 
-// ---- New batches, in `r` ----
+// ---- New batches, in ctx->out ----
 
 // Views of the strings where mask[i] != 0 (n entries), in order. The bytes
 // are not copied.
-faf_batch *faf_batch_select(faf_region r, const faf_batch *b,
+faf_batch *faf_batch_select(const faf_ctx *ctx, const faf_batch *b,
                             const uint8_t *mask);
 
 // Views of strings idx[0..m) (each < n, repeats allowed).
-faf_batch *faf_batch_take(faf_region r, const faf_batch *b, const int64_t *idx,
-                          size_t m);
+faf_batch *faf_batch_take(const faf_ctx *ctx, const faf_batch *b,
+                          const int64_t *idx, size_t m);
 
 // ASCII lower case (upper != 0: upper case) copies of the strings. Other bytes
 // are unchanged. Views in order over most of their range (a split, Arrow
 // offsets) are converted in one pass; when they also start at 0 the result
 // uses b's views instead of copying them.
-faf_batch *faf_batch_ascii_case(faf_region r, const faf_batch *b, int upper);
+faf_batch *faf_batch_ascii_case(const faf_ctx *ctx, const faf_batch *b,
+                                int upper);
 
 // The strings end to end (Arrow layout).
-faf_batch *faf_batch_compact(faf_region r, const faf_batch *b);
+faf_batch *faf_batch_compact(const faf_ctx *ctx, const faf_batch *b);
 
 // ---- Writing ----
 

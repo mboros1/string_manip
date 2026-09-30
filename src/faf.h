@@ -4,6 +4,7 @@
 // Umbrella header: the whole FAF string library.
 
 #include "faf_batch.h"
+#include "faf_ctx.h"
 #include "faf_string.h"
 #include "faf_string_arr.h"
 #include "faf_string_build.h"

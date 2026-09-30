@@ -18,9 +18,10 @@ Include `faf.h` for everything, or the individual headers:
 | `faf_string_parse.h` | `parse_i64` / `parse_u64` / `parse_f64`, `from_i64` / `from_u64`, `is_ascii`, `utf8_valid` |
 | `faf_string_ring.h` | `faf_ring`: a ring of strings over your buffer; old strings are overwritten, and handles detect it (`push`, `get`, `valid`) |
 | `faf_string_hash.h`, `faf_string_sort.h` | 64 bit `hash`, `sort_chars`, `arr_sort` |
-| `faf_batch.h` | Many strings per call, for bindings: a batch is views into one buffer, allocated in a region. Make (`split`, `from_offsets`, `from_views`), query per string (`find`, `count`, `contains`, `eq`, `hash`, ...), derive into a region (`select`, `take`, `ascii_case`, `compact`), `join`. Pointers, integers and the region only; `make shared` builds `libfaf.dylib` / `.so` |
+| `faf_batch.h` | Many strings per call, for bindings: a batch is views into one buffer, allocated in a region. Make (`split`, `from_offsets`, `from_views`), query per string (`find`, `count`, `contains`, `eq`, `hash`, ...), derive (`select`, `take`, `ascii_case`, `compact`), `join`. Calls that make a batch take a `faf_ctx` (`faf_ctx.h`). Pointers, integers and the context only; `make shared` builds `libfaf.dylib` / `.so` |
+| `faf_ctx.h` | `faf_ctx`: the region a call's results go to, and an optional `faf_tuning`, set with named fields (zero means default). A tuning holds strategy thresholds by key (`faf_tuning_new/set/get`), defaults per backend; it changes speed, never results |
 
-Functions that allocate take a `faf_region` and return `FAF_STRING_NONE` when the region is out of space. Everything allocated from a region is freed at once by `faf_region_release`.
+Functions that allocate take a `faf_region` (batch calls: a `faf_ctx` holding one) and return `FAF_STRING_NONE` when the region is out of space. Everything allocated from a region is freed at once by `faf_region_release`.
 
 ## Source layout
 

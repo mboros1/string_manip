@@ -44,15 +44,20 @@ class _Region(ctypes.Structure):
     _fields_ = [("arena", c_void_p), ("pool", c_uint16), ("gen", c_uint16)]
 
 
+class _Ctx(ctypes.Structure):
+    # faf_ctx from faf_ctx.h, passed by pointer; tuning NULL: the defaults
+    _fields_ = [("out", _Region), ("tuning", c_void_p)]
+
+
 def _declare(lib):
-    P, R = c_void_p, _Region
+    P, R, C = c_void_p, _Region, ctypes.POINTER(_Ctx)
     sig = {
         "faf_arena_size": (c_size_t, []),
         "faf_arena_init": (c_bool, [P, P, c_size_t, c_size_t]),
         "faf_arena_acquire": (R, [P]),
         "faf_region_release": (None, [R]),
-        "faf_batch_split": (P, [R, P, c_size_t, c_char]),
-        "faf_batch_from_offsets": (P, [R, P, P, c_size_t]),
+        "faf_batch_split": (P, [C, P, c_size_t, c_char]),
+        "faf_batch_from_offsets": (P, [C, P, P, c_size_t]),
         "faf_batch_len": (c_size_t, [P]),
         "faf_batch_data": (P, [P]),
         "faf_batch_starts": (P, [P]),
@@ -62,10 +67,10 @@ def _declare(lib):
         "faf_batch_find": (None, [P, P, c_size_t, P]),
         "faf_batch_count": (None, [P, P, c_size_t, P]),
         "faf_batch_hash": (None, [P, c_uint64, P]),
-        "faf_batch_select": (P, [R, P, P]),
-        "faf_batch_take": (P, [R, P, P, c_size_t]),
-        "faf_batch_ascii_case": (P, [R, P, c_int]),
-        "faf_batch_compact": (P, [R, P]),
+        "faf_batch_select": (P, [C, P, P]),
+        "faf_batch_take": (P, [C, P, P, c_size_t]),
+        "faf_batch_ascii_case": (P, [C, P, c_int]),
+        "faf_batch_compact": (P, [C, P]),
         "faf_batch_ascii_case_inplace": (None, [P, c_int]),
         "faf_batch_join": (c_int64, [P, P, c_size_t, P]),
     }
@@ -151,6 +156,7 @@ class Region:
             self.r = lib.faf_arena_acquire(arena.state)
         if not self.r.arena:
             raise MemoryError("faf: every region is in use")
+        self.ctx = ctypes.byref(_Ctx(out=self.r))  # where results go
         self.open = True
         self.keep = []  # Python objects batches point into
 
@@ -179,7 +185,7 @@ class Region:
         if len(sep) != 1:
             raise ValueError("split separator must be one byte")
         n = len(data) if _len is None else _len
-        return self._batch(lib.faf_batch_split(self.r, _address(data), n, sep), data)
+        return self._batch(lib.faf_batch_split(self.ctx, _address(data), n, sep), data)
 
     def lines(self, data):
         """Like split(b"\\n"), without the empty piece after a final newline
@@ -192,7 +198,7 @@ class Region:
         """Arrow layout: string i is data[offsets[first + i] : ...[first + i + 1]].
         Nothing is copied."""
         o = _address(offsets) + 8 * first
-        return self._batch(lib.faf_batch_from_offsets(self.r, _address(data), o, n),
+        return self._batch(lib.faf_batch_from_offsets(self.ctx, _address(data), o, n),
                            (data, offsets))
 
     def from_list(self, items):
@@ -327,7 +333,7 @@ class Batch:
         r = into or self.region
         if not r.open:
             raise ValueError("faf: region already released")
-        return r._batch(fn(r.r, self._p(), *args))
+        return r._batch(fn(r.ctx, self._p(), *args))
 
     def filter(self, mask, into=None):
         """The strings where mask is non-zero (mask: array('B'), bytes, ...)."""

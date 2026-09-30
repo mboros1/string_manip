@@ -39,7 +39,7 @@ static inline faf_string view(const faf_batch *h, size_t i) {
 /* ---- Layout of a new batch ---- */
 
 // A new batch being built: the batch, then its arrays and bytes, carved from
-// one reservation in the caller's region.
+// one reservation in the caller's region (ctx->out).
 typedef struct {
   faf_batch *b;
   char *cur;
@@ -47,9 +47,10 @@ typedef struct {
 
 // Reserve room for a batch plus `bytes` of arrays and data (with slack for
 // aligning each piece). False, and the region unchanged, if it doesn't fit.
-static bool start(builder *bd, faf_region r, size_t bytes) {
+static bool start(builder *bd, const faf_ctx *ctx, size_t bytes) {
   size_t need = sizeof(faf_batch) + bytes + 4 * sizeof(int64_t);
-  faf_span sp = faf_reserve(r, need / FAF_SLOT_BYTES + 1);
+  faf_span sp =
+      ctx ? faf_reserve(ctx->out, need / FAF_SLOT_BYTES + 1) : FAF_SPAN_NONE;
   if (!sp.ptr)
     return false;
   bd->b = (faf_batch *)(void *)sp.ptr;
@@ -76,13 +77,13 @@ static inline faf_batch *done(builder *bd, const char *data,
 
 #define SPLIT_BATCH 64
 
-faf_batch *faf_batch_split(faf_region r, const char *data, size_t len,
-                          char sep) {
+faf_batch *faf_batch_split(const faf_ctx *ctx, const char *data, size_t len,
+                           char sep) {
   // (len 0: data may be NULL, so no kernel sees it)
   data = or_empty(data);
   size_t n = len ? faf_k_count_byte(data, len, sep) + 1 : 1;
   builder bd;
-  if (n > SIZE_MAX / 16 || !start(&bd, r, 2 * n * sizeof(int64_t)))
+  if (n > SIZE_MAX / 16 || !start(&bd, ctx, 2 * n * sizeof(int64_t)))
     return 0;
   int64_t *starts = carve(&bd, n * sizeof(int64_t));
   int64_t *ends = carve(&bd, n * sizeof(int64_t));
@@ -105,23 +106,22 @@ faf_batch *faf_batch_split(faf_region r, const char *data, size_t len,
   return done(&bd, data, starts, ends, n, ORDERED | DENSE);
 }
 
-faf_batch *faf_batch_from_offsets(faf_region r, const char *data,
-                                 const int64_t *offsets, size_t n) {
+faf_batch *faf_batch_from_offsets(const faf_ctx *ctx, const char *data,
+                                  const int64_t *offsets, size_t n) {
   builder bd;
-  if (!start(&bd, r, 0))
+  if (!start(&bd, ctx, 0))
     return 0;
   return done(&bd, data, offsets, offsets + 1, n, ORDERED | DENSE);
 }
 
-faf_batch *faf_batch_from_views(faf_region r, const char *data,
-                               const int64_t *starts, const int64_t *ends,
-                               size_t n) {
+faf_batch *faf_batch_from_views(const faf_ctx *ctx, const char *data,
+                                const int64_t *starts, const int64_t *ends,
+                                size_t n) {
   builder bd;
-  if (!start(&bd, r, 0))
+  if (!start(&bd, ctx, 0))
     return 0;
   return done(&bd, data, starts, ends, n, 0);
 }
-
 
 /* ---- Reading a batch ---- */
 
@@ -207,10 +207,11 @@ void faf_batch_hash(const faf_batch *b, uint64_t seed, uint64_t *out) {
 
 /* ---- New batches ---- */
 
-faf_batch *faf_batch_select(faf_region r, const faf_batch *b, const uint8_t *mask) {
+faf_batch *faf_batch_select(const faf_ctx *ctx, const faf_batch *b,
+                            const uint8_t *mask) {
   const faf_batch *h = b;
   builder bd;
-  if (!h || !start(&bd, r, 2 * h->n * sizeof(int64_t)))
+  if (!h || !start(&bd, ctx, 2 * h->n * sizeof(int64_t)))
     return 0;
   int64_t *starts = carve(&bd, h->n * sizeof(int64_t));
   int64_t *ends = carve(&bd, h->n * sizeof(int64_t));
@@ -224,11 +225,11 @@ faf_batch *faf_batch_select(faf_region r, const faf_batch *b, const uint8_t *mas
   return done(&bd, h->data, starts, ends, m, h->flags & ORDERED);
 }
 
-faf_batch *faf_batch_take(faf_region r, const faf_batch *b, const int64_t *idx,
-                         size_t m) {
+faf_batch *faf_batch_take(const faf_ctx *ctx, const faf_batch *b,
+                          const int64_t *idx, size_t m) {
   const faf_batch *h = b;
   builder bd;
-  if (!h || !start(&bd, r, 2 * m * sizeof(int64_t)))
+  if (!h || !start(&bd, ctx, 2 * m * sizeof(int64_t)))
     return 0;
   int64_t *starts = carve(&bd, m * sizeof(int64_t));
   int64_t *ends = carve(&bd, m * sizeof(int64_t));
@@ -240,10 +241,10 @@ faf_batch *faf_batch_take(faf_region r, const faf_batch *b, const int64_t *idx,
 }
 
 // The strings end to end (Arrow layout): copied, or case converted.
-static faf_batch *packed(faf_region r, const faf_batch *h, int64_t total,
-                        bool copy, bool upper) {
+static faf_batch *packed(const faf_ctx *ctx, const faf_batch *h, int64_t total,
+                         bool copy, bool upper) {
   builder bd;
-  if (!start(&bd, r, (h->n + 1) * sizeof(int64_t) + (size_t)total))
+  if (!start(&bd, ctx, (h->n + 1) * sizeof(int64_t) + (size_t)total))
     return 0;
   int64_t *offsets = carve(&bd, (h->n + 1) * sizeof(int64_t));
   char *dst = carve(&bd, (size_t)total);
@@ -261,19 +262,19 @@ static faf_batch *packed(faf_region r, const faf_batch *h, int64_t total,
   return done(&bd, dst, offsets, offsets + 1, h->n, ORDERED | DENSE);
 }
 
-faf_batch *faf_batch_compact(faf_region r, const faf_batch *b) {
+faf_batch *faf_batch_compact(const faf_ctx *ctx, const faf_batch *b) {
   const faf_batch *h = b;
-  return h ? packed(r, h, faf_batch_total(b), true, false) : NULL;
+  return h ? packed(ctx, h, faf_batch_total(b), true, false) : NULL;
 }
 
 // One pass over data[lo, lo + span), and the same views shifted by -lo. When
 // lo is 0 they need no shift, and the result shares the input's views instead
 // of copying them (16 bytes a string, more than short strings themselves).
-static faf_batch *one_pass(faf_region r, const faf_batch *h, int64_t lo,
-                          int64_t span, bool upper) {
+static faf_batch *one_pass(const faf_ctx *ctx, const faf_batch *h, int64_t lo,
+                           int64_t span, bool upper) {
   size_t views = lo ? 2 * h->n * sizeof(int64_t) : 0;
   builder bd;
-  if (!start(&bd, r, views + (size_t)span))
+  if (!start(&bd, ctx, views + (size_t)span))
     return 0;
   if (lo == 0) {
     char *dst = carve(&bd, (size_t)span);
@@ -291,25 +292,35 @@ static faf_batch *one_pass(faf_region r, const faf_batch *h, int64_t lo,
   return done(&bd, dst, starts, ends, h->n, h->flags);
 }
 
-faf_batch *faf_batch_ascii_case(faf_region r, const faf_batch *b, int upper) {
+faf_batch *faf_batch_ascii_case(const faf_ctx *ctx, const faf_batch *b,
+                                int upper) {
   const faf_batch *h = b;
   if (!h)
     return 0;
   if (h->n == 0)
-    return packed(r, h, 0, false, upper != 0);
+    return packed(ctx, h, 0, false, upper != 0);
   if (h->flags & DENSE) // in order with at most a byte between: the range
-    return one_pass(r, h, h->starts[0], h->ends[h->n - 1] - h->starts[0],
+    return one_pass(ctx, h, h->starts[0], h->ends[h->n - 1] - h->starts[0],
                     upper != 0);
-  // scattered: one pass only if the views cover at least half their range
-  int64_t lo = h->starts[0], hi = h->ends[0], total = 0;
+  // scattered: one pass if the range isn't much wider than the strings
+  // (FAF_TUNE_CASE_ONE_PASS_PERCENT); if the layout chosen doesn't fit, the
+  // other one, so the tuning never decides whether there is a result
+  int64_t lo = h->starts[0], hi = h->ends[0], total = 0, percent;
   for (size_t i = 0; i < h->n; ++i) {
     lo = h->starts[i] < lo ? h->starts[i] : lo;
     hi = h->ends[i] > hi ? h->ends[i] : hi;
     total += h->ends[i] - h->starts[i];
   }
-  if (hi - lo <= 2 * total)
-    return one_pass(r, h, lo, hi - lo, upper != 0);
-  return packed(r, h, total, false, upper != 0);
+  faf_tuning_get(ctx ? ctx->tuning : NULL, FAF_TUNE_CASE_ONE_PASS_PERCENT,
+                 &percent);
+  bool pass = (hi - lo) * 100 <= total * percent;
+  for (int tries = 0; tries < 2; ++tries, pass = !pass) {
+    faf_batch *out = pass ? one_pass(ctx, h, lo, hi - lo, upper != 0)
+                          : packed(ctx, h, total, false, upper != 0);
+    if (out)
+      return out;
+  }
+  return 0;
 }
 
 /* ---- Writing ---- */

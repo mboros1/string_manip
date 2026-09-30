@@ -386,7 +386,19 @@ was sized like a result; it now uses two arenas sized for what they hold.
 In Python, lower case stays even with pyarrow, and 100-string batches beat
 plain Python 4.4x (2.4x with a region per result).
 
-## Lessons
+## 13. A context for calls that make things (09-30)
+
+The batch split's best strategy differs by board (above), and more choices
+like it will come. Rather than variants or caller hints, calls that make a
+batch take a `faf_ctx`: the region results go to, and an optional
+`faf_tuning`, set with named fields where zero means the default. A tuning is
+opaque, with keys whose defaults each build takes from its backend, and a
+binding can override them. Tuning changes speed, never results; a test runs
+the case checks under random values. The first key is lower case's one-pass
+threshold (it was a constant); if the layout it picks doesn't fit the region,
+the other one is tried, so a tuning can't decide whether there is a result.
+The split key waits for measurements of the split strategies.
+
 ## Lessons
 
 - **On in-order cores, codegen details are the performance.** A taken branch,

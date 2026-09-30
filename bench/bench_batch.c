@@ -52,7 +52,7 @@ static bool setup(void) {
   }
   buf_len = at - 1; // no trailing newline: exactly NLINES pieces
   in_r = faf_arena_acquire(&in_arena);
-  lines_b = faf_batch_split(in_r, buf, buf_len, '\n');
+  lines_b = faf_batch_split(&(faf_ctx){.out = in_r}, buf, buf_len, '\n');
   starts = faf_batch_starts(lines_b);
   ends = faf_batch_ends(lines_b);
   return lines_b != NULL;
@@ -121,9 +121,9 @@ static void join(const faf_batch *b) {
 // it, as a caller doing one step of work would.
 #define MADE(call)                                                             \
   do {                                                                         \
-    faf_region r = faf_arena_acquire(&out_arena);                              \
+    faf_ctx ctx = {.out = faf_arena_acquire(&out_arena)};                      \
     sink += faf_batch_len(call);                                               \
-    faf_region_release(r);                                                     \
+    faf_region_release(ctx.out);                                               \
   } while (0)
 
 void bench_batch(void) {
@@ -139,7 +139,7 @@ void bench_batch(void) {
 
   group_begin("split into lines", NS_PER_OP);
   BENCH("faf_batch_split (+ region)", n,
-        MADE(faf_batch_split(r, buf, buf_len, '\n')));
+        MADE(faf_batch_split(&ctx, buf, buf_len, '\n')));
   BENCH("next_token loop", n, loop_split());
 
   group_begin("contains \"ab\"", NS_PER_OP);
@@ -159,7 +159,7 @@ void bench_batch(void) {
 
   group_begin("lower case copy", NS_PER_OP);
   BENCH("faf_batch_ascii_case (one pass, + region)", n,
-        MADE(faf_batch_ascii_case(r, b, 0)));
+        MADE(faf_batch_ascii_case(&ctx, b, 0)));
   BENCH("faf_k_ascii_case loop", n, loop_lower());
 
   // one operation each, with nothing to compare against
@@ -172,9 +172,9 @@ void bench_batch(void) {
         faf_batch_find(b, "ab", 2, out64);
         sink += (size_t)out64[0]);
   group_begin("select by mask (views only, + region)", NS_PER_OP);
-  BENCH("faf_batch_select", n, MADE(faf_batch_select(r, b, mask)));
+  BENCH("faf_batch_select", n, MADE(faf_batch_select(&ctx, b, mask)));
   group_begin("copy into a new buffer", NS_PER_OP);
-  BENCH("faf_batch_compact (+ region)", n, MADE(faf_batch_compact(r, b)));
+  BENCH("faf_batch_compact (+ region)", n, MADE(faf_batch_compact(&ctx, b)));
   BENCH("faf_batch_join with \\n", n, join(b));
   group_end();
 
