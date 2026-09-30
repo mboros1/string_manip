@@ -376,6 +376,16 @@ passes. The Python example follows (`8e88e29`): `with faf.region() as r:`,
 batches unusable after the block, results optionally `into` another region.
 A Python library that hides lifetimes can be built on top.
 
+On the boards (`68a4669`): region operations are as before the arena table,
+lower case in one pass is 1.9x a per-line loop on both, and the batch split
+is 2.6x slower than a `next_token` loop on the original ESP32 (it counts
+first, to size its region, and that chip's SWAR search is slow) but 1.1x
+faster on the S3. The batch benchmark first asked for 200 KB, more heap than
+the boards have: an arena's pools are one size, so the input's small region
+was sized like a result; it now uses two arenas sized for what they hold.
+In Python, lower case stays even with pyarrow, and 100-string batches beat
+plain Python 4.4x (2.4x with a region per result).
+
 ## Lessons
 ## Lessons
 
