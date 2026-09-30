@@ -65,7 +65,7 @@ ownership into the cursor; `concat` reached into the pool arrays directly.
 **Left for later:** allocation across pools (chaining regions), and a
 ring-buffer region where old data is overwritten and handles detect it with a
 monotonic 64-bit write position (valid while `offset >= write_pos -
-capacity`). The ring is `faf_ring`, still not started.
+capacity`). The ring became `faf_ring` (section 7).
 
 ## 1. Foundations (09-27)
 
@@ -130,7 +130,7 @@ Clang target must provide them anyway, and drop `FAF_PROVIDE_LIBC_MEM`.
 
 **Layout** (`db96ee8`): `src/`, `src/kernels/`, `tests/`, `bench/`, `tools/`,
 `experiments/` (pdqsort's C port lives there; the library's sort stayed
-simple).
+simple). `src/` was split by subsystem later (section 14).
 
 ## 3. Microcontrollers (09-28 midday)
 
@@ -336,7 +336,8 @@ own input builder had freed; with fresh memory on both sides they are even.
 
 ## 11. Consolidation (09-29)
 
-An audit of the session found layers patching earlier choices: a `faf_ffi_*`
+Most of this was undone the same day (section 12); it is kept because the
+reasons are the useful part. An audit of the session found layers patching earlier choices: a `faf_ffi_*`
 wrapper existed because region handles changed layout with `FAF_ARENAS`, and
 the shim carried layout and strategy logic every binding would repeat. So:
 
@@ -390,7 +391,7 @@ plain Python 4.4x (2.4x with a region per result).
 
 The batch split's best strategy differs by board (above), and more choices
 like it will come. Rather than variants or caller hints, calls that make a
-batch take a `faf_ctx`: the region results go to, and an optional
+batch take a `faf_ctx` (`69aca1c`): the region results go to, and an optional
 `faf_tuning`, set with named fields where zero means the default. A tuning is
 opaque, with keys whose defaults each build takes from its backend, and a
 binding can override them. Tuning changes speed, never results; a test runs
@@ -415,6 +416,25 @@ those are the defaults. Recorded at `ca90481`, ns per line:
 On the ESP32 the batch split went from 2.6x slower than a `next_token` loop
 to even with it, and on dense commas it is 1.6x faster.
 
+## 14. Subsystem directories (09-30)
+
+With 30 files at the top of `src/`, the library was split by layer
+(`56d8de8`): `core/` (the string type, the backend choice), `mem/` (arenas,
+regions, the ring), `text/` (per-string operations), `batch/` (batches and
+`faf_ctx`), and `kernels/`. Each layer includes only the ones below it.
+Files were moved, not renamed or merged. The library still needs no include
+paths (its files include each other relatively), and `faf.h` is where it was.
+
+## Where it stands (09-30)
+
+The library as it is now was built in four days, 09-27 to 09-30, 107 commits
+on top of a 2024 prototype: about 4,800 lines of library, 3,400 of tests and
+1,900 of benchmarks. Every suite passes on the M1 (NEON, SWAR, ref, small
+pools, freestanding), on x86-64 Linux in CI (SSE2), and on both boards; 50
+benchmark runs are recorded against their commits. The Python example is
+about 390 lines of ctypes and the standard library. Not measured: SSE2 (its
+split default is NEON's).
+
 ## Lessons
 
 - **On in-order cores, codegen details are the performance.** A taken branch,
@@ -429,6 +449,12 @@ to even with it, and on dense commas it is 1.6x faster.
   built: with second-resolution timestamps, `make` can skip the rebuild.
 - **Count what the OS does, not just the time.** Page faults explained in one
   run a cold gap that timing alone had attributed to the wrong thing twice.
+- **Watch for layers that patch layers.** Each step of section 11 was
+  reasonable on its own, and together they bent the library toward one
+  binding and one benchmark. The fix was the README's own model, restated.
+- **Measure the crossover instead of picking a strategy.** Split's best
+  search flips between 48 and 256 bytes depending on the chip; a sweep chose
+  the defaults, and a test proves the choice never changes a result.
 - **Keep an oracle.** Every backend is checked against the `ref` kernels at
   every length and alignment; it caught each assembly bug before a benchmark
   could.
