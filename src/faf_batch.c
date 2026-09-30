@@ -75,35 +75,117 @@ static inline faf_batch *done(builder *bd, const char *data,
 
 /* ---- Making batches ---- */
 
-#define SPLIT_BATCH 64
+#define SPLIT_BATCH 64 // separators found per faf_k_find_bytes scan
+#define SPLIT_PROBE 16 // separators found one at a time before choosing
+
+// A split's ends (the separators' positions), growing in one reservation as
+// they are found, so nothing counts them first. The starts go after them.
+typedef struct {
+  faf_region r;
+  faf_span sp;
+  int64_t *ends;
+  size_t cap; // entries the reservation holds from `ends` on
+} ends_list;
+
+static size_t ends_fit(const ends_list *e) {
+  char *top = (char *)(e->sp.ptr + e->sp.slots);
+  return (size_t)(top - (char *)e->ends) / sizeof(int64_t);
+}
+
+static bool ends_start(ends_list *e, faf_region r) {
+  size_t bytes = sizeof(faf_batch) + (2 * SPLIT_BATCH + 1) * sizeof(int64_t);
+  e->r = r;
+  e->sp = faf_reserve(r, bytes / FAF_SLOT_BYTES + 1);
+  if (!e->sp.ptr)
+    return false;
+  uintptr_t at = (uintptr_t)((char *)e->sp.ptr + sizeof(faf_batch));
+  e->ends = (int64_t *)((at + 7) & ~(uintptr_t)7);
+  e->cap = ends_fit(e);
+  return true;
+}
+
+// Room for `entries`: the reservation doubles, or takes the rest of the
+// region when doubling doesn't fit (the split gives back what it doesn't
+// use). It is the region's latest, so it grows in place.
+static bool ends_room(ends_list *e, size_t entries) {
+  if (entries <= e->cap)
+    return true;
+  if (entries > SIZE_MAX / 16)
+    return false;
+  size_t need = (entries - e->cap) * sizeof(int64_t) / FAF_SLOT_BYTES + 1;
+  size_t more = e->sp.slots > need ? e->sp.slots : need;
+  size_t left = faf_region_remaining(e->r);
+  more = more < left ? more : left;
+  if (more < need || !faf_reserve_extend(e->r, &e->sp, more))
+    return false;
+  e->cap = ends_fit(e);
+  return true;
+}
+
+// Position of the first `sep` in data[from, len), or SIZE_MAX.
+static size_t next_sep(const char *data, size_t from, size_t len, char sep) {
+  if (from >= len)
+    return SIZE_MAX;
+  size_t at = faf_k_find_byte(data + from, len - from, sep);
+  return at == len - from ? SIZE_MAX : from + at;
+}
 
 faf_batch *faf_batch_split(const faf_ctx *ctx, const char *data, size_t len,
                            char sep) {
-  // (len 0: data may be NULL, so no kernel sees it)
-  data = or_empty(data);
-  size_t n = len ? faf_k_count_byte(data, len, sep) + 1 : 1;
-  builder bd;
-  if (n > SIZE_MAX / 16 || !start(&bd, ctx, 2 * n * sizeof(int64_t)))
+  data = or_empty(data); // (len 0: data may be NULL)
+  ends_list e;
+  if (!ctx || !ends_start(&e, ctx->out))
     return 0;
-  int64_t *starts = carve(&bd, n * sizeof(int64_t));
-  int64_t *ends = carve(&bd, n * sizeof(int64_t));
-
-  size_t pos[SPLIT_BATCH];
-  size_t k = 0, from = 0;
-  for (; len;) {
-    size_t got = faf_k_find_bytes(data + from, len - from, sep, pos, SPLIT_BATCH);
-    size_t base = from;
-    for (size_t j = 0; j < got; ++j, ++k) {
-      starts[k] = (int64_t)from;
-      ends[k] = (int64_t)(base + pos[j]);
-      from = base + pos[j] + 1;
-    }
-    if (got < SPLIT_BATCH)
-      break;
+  size_t k = 0, from = 0, at = 0;
+  // The first separators one at a time: cheap wherever they are, and how far
+  // apart they are says whether scanning for the rest in batches pays
+  // (FAF_TUNE_SPLIT_BATCH_GAP).
+  while (k < SPLIT_PROBE && (at = next_sep(data, from, len, sep)) != SIZE_MAX) {
+    if (!ends_room(&e, k + 1))
+      goto fail;
+    e.ends[k++] = (int64_t)at;
+    from = at + 1;
   }
-  starts[k] = (int64_t)from;
-  ends[k] = (int64_t)len;
-  return done(&bd, data, starts, ends, n, ORDERED | DENSE);
+  int64_t gap;
+  faf_tuning_get(ctx->tuning, FAF_TUNE_SPLIT_BATCH_GAP, &gap);
+  if (k == SPLIT_PROBE && from <= (size_t)gap * SPLIT_PROBE) {
+    size_t pos[SPLIT_BATCH], got = SPLIT_BATCH;
+    while (got == SPLIT_BATCH && from < len) {
+      got = faf_k_find_bytes(data + from, len - from, sep, pos, SPLIT_BATCH);
+      if (!ends_room(&e, k + got))
+        goto fail;
+      for (size_t j = 0; j < got; ++j)
+        e.ends[k++] = (int64_t)(from + pos[j]);
+      from = got ? (size_t)e.ends[k - 1] + 1 : from;
+    }
+  } else if (k == SPLIT_PROBE) {
+    while ((at = next_sep(data, from, len, sep)) != SIZE_MAX) {
+      if (!ends_room(&e, k + 1))
+        goto fail;
+      e.ends[k++] = (int64_t)at;
+      from = at + 1;
+    }
+  }
+  size_t n = k + 1; // the last piece runs to the end
+  if (!ends_room(&e, 2 * n))
+    goto fail;
+  e.ends[k] = (int64_t)len;
+  int64_t *starts = e.ends + n;
+  starts[0] = 0;
+  for (size_t i = 1; i < n; ++i)
+    starts[i] = e.ends[i - 1] + 1;
+  size_t used = (size_t)((char *)(starts + n) - (char *)e.sp.ptr);
+  faf_reserve_shrink(e.r, &e.sp, used / FAF_SLOT_BYTES + 1);
+  faf_batch *b = (faf_batch *)(void *)e.sp.ptr;
+  *b = (faf_batch){.data = data,
+                   .starts = starts,
+                   .ends = e.ends,
+                   .n = n,
+                   .flags = ORDERED | DENSE};
+  return b;
+fail:
+  faf_reserve_shrink(e.r, &e.sp, 0); // the region as it was
+  return 0;
 }
 
 faf_batch *faf_batch_from_offsets(const faf_ctx *ctx, const char *data,

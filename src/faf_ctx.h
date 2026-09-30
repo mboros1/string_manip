@@ -29,6 +29,10 @@ typedef enum {
   // whole range in one pass (instead of packing each string) when the range
   // is at most this percent of the strings' total length. 0..1000000.
   FAF_TUNE_CASE_ONE_PASS_PERCENT = 1,
+  // faf_batch_split: after the first separators (found one at a time), find
+  // the rest in batches of 64 per scan when they are on average at most this
+  // many bytes apart, else keep finding them one at a time. 0..1000000.
+  FAF_TUNE_SPLIT_BATCH_GAP = 2,
 } faf_tune_key;
 
 // A tuning in `r`, holding this build's defaults. NULL if `r` is out of space.

@@ -112,10 +112,10 @@ static void test_split_cases(void) {
     check_split(cases[c], strlen(cases[c]), '\n', cases[c]);
 }
 
-static void test_split_random(void) {
-  // separators at every density and position, across the 64-per-scan batches
+// Separators at every density and position, across the 64-per-scan batches.
+static void split_rounds(int rounds) {
   char *buf = split_buf;
-  for (int round = 0; round < 200; ++round) {
+  for (int round = 0; round < rounds; ++round) {
     size_t len = rng() % SPLIT_BYTES;
     unsigned density = 1 + rng() % 40; // one separator per `density` bytes
     size_t pieces = 1;
@@ -128,6 +128,8 @@ static void test_split_random(void) {
     check_split(buf, len, ',', "random split");
   }
 }
+
+static void test_split_random(void) { split_rounds(200); }
 
 // Scattered views of a short string: random, overlapping, unsorted.
 static const char *words = "Error: disk FULL; error again, ERROR x; errors";
@@ -334,16 +336,19 @@ static void test_tuning(void) {
               "out of range set");
   faf_tuning_get(t, FAF_TUNE_CASE_ONE_PASS_PERCENT, &v);
   ASSERT_INT_EQ(200, (int)v, "a refused set changed the value");
-  // tuning changes speed, never results: every layout gives the same strings
-  int64_t values[12] = {0, 1, 99, 100, 200, 201, 1000, 1000000};
+  // tuning changes speed, never results: every strategy gives the same
+  // strings (split: found one at a time, or in batches after the first 16)
+  int64_t values[12] = {0, 1, 2, 16, 99, 200, 1000, 1000000};
   for (int i = 8; i < 12; ++i)
     values[i] = rng() % 1000001;
   C.tuning = t;
   for (int i = 0; i < 12; ++i) {
-    ASSERT_TRUE(faf_tuning_set(t, FAF_TUNE_CASE_ONE_PASS_PERCENT, values[i]),
+    ASSERT_TRUE(faf_tuning_set(t, FAF_TUNE_CASE_ONE_PASS_PERCENT, values[i]) &&
+                    faf_tuning_set(t, FAF_TUNE_SPLIT_BATCH_GAP, values[11 - i]),
                 "set");
     fresh();
     check_scattered();
+    split_rounds(40);
   }
   // and the key is read: 0 packs the strings, the most converts the range
   size_t n = make_views();

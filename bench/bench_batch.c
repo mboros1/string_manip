@@ -24,16 +24,24 @@ static const int64_t *starts, *ends;
 static int64_t *out64;
 static uint8_t *mask;
 static uint64_t *hashes;
+// split's two strategies, forced (FAF_TUNE_SPLIT_BATCH_GAP)
+static const faf_tuning *batched, *single;
 
 // False if there isn't memory (small boards).
 static bool setup(void) {
   buf_len = 0;
-  for (int i = 0; i < NLINES; ++i)
+  size_t commas = 0;
+  for (int i = 0; i < NLINES; ++i) {
     buf_len += line_lens[i] + 1;
+    for (size_t j = 0; j < line_lens[i]; ++j)
+      commas += lines[i][j] == ',';
+  }
   size_t n = NLINES;
   size_t views = 2 * (n + 1) * sizeof(int64_t) + 512; // bytes
+  size_t fields = 2 * (commas + 1) * sizeof(int64_t) + 512;
+  size_t result = buf_len + views > fields ? buf_len + views : fields;
   size_t in_bytes = faf_arena_bytes(1, views / FAF_SLOT_BYTES + 1);
-  size_t out_bytes = faf_arena_bytes(1, (buf_len + views) / FAF_SLOT_BYTES + 1);
+  size_t out_bytes = faf_arena_bytes(1, result / FAF_SLOT_BYTES + 1);
   buf = malloc(buf_len);
   in_buf = malloc(in_bytes);
   out_buf = malloc(out_bytes);
@@ -55,6 +63,12 @@ static bool setup(void) {
   lines_b = faf_batch_split(&(faf_ctx){.out = in_r}, buf, buf_len, '\n');
   starts = faf_batch_starts(lines_b);
   ends = faf_batch_ends(lines_b);
+  faf_tuning *tb = faf_tuning_new(in_r), *ts = faf_tuning_new(in_r);
+  if (!tb || !ts)
+    return false;
+  faf_tuning_set(tb, FAF_TUNE_SPLIT_BATCH_GAP, 1000000);
+  faf_tuning_set(ts, FAF_TUNE_SPLIT_BATCH_GAP, 0);
+  batched = tb, single = ts;
   return lines_b != NULL;
 }
 
@@ -76,10 +90,10 @@ static faf_string line_at(size_t i) {
 
 /* ---- per string, in C ---- */
 
-static void loop_split(void) {
+static void loop_split(char sep) {
   faf_string rest = faf_string_init_n(buf, buf_len), piece;
   size_t k = 0;
-  while (faf_string_next_token(&rest, '\n', &piece))
+  while (faf_string_next_token(&rest, sep, &piece))
     k += (size_t)(piece.end - piece.start);
   sink += k;
 }
@@ -118,13 +132,61 @@ static void join(const faf_batch *b) {
 }
 
 // A batch call that makes a new one, in a region taken and released around
-// it, as a caller doing one step of work would.
-#define MADE(call)                                                             \
+// it, as a caller doing one step of work would; MADE_WITH also tunes it.
+#define MADE_WITH(t, call)                                                     \
   do {                                                                         \
-    faf_ctx ctx = {.out = faf_arena_acquire(&out_arena)};                      \
+    faf_ctx ctx = {.out = faf_arena_acquire(&out_arena), .tuning = (t)};       \
     sink += faf_batch_len(call);                                               \
     faf_region_release(ctx.out);                                               \
   } while (0)
+#define MADE(call) MADE_WITH(NULL, call)
+
+// Splitting the input on `sep`: the default strategy, each one forced, and
+// a next_token loop.
+static void bench_split(char sep) {
+  const size_t n = NLINES;
+  BENCH("faf_batch_split (+ region)", n,
+        MADE(faf_batch_split(&ctx, buf, buf_len, sep)));
+  BENCH("  in batches of 64", n,
+        MADE_WITH(batched, faf_batch_split(&ctx, buf, buf_len, sep)));
+  BENCH("  one at a time", n,
+        MADE_WITH(single, faf_batch_split(&ctx, buf, buf_len, sep)));
+  BENCH("next_token loop", n, loop_split(sep));
+}
+
+// Where split's two strategies cross over (FAF_TUNE_SPLIT_BATCH_GAP's
+// default): separators on average `gap` bytes apart, at random distances.
+// Written over the input, so it runs last.
+static void bench_split_gaps(void) {
+  static const int gaps[] = {8, 16, 32, 64, 128, 256};
+  enum { NGAPS = sizeof gaps / sizeof gaps[0], LEN = 16384, REPS = 16 };
+  static char names[NGAPS][48]; // printed when the next group begins
+  if (buf_len < LEN)
+    return;
+  char *s = buf;
+  uint32_t x = 2463534242u;
+  for (size_t g = 0; g < NGAPS; ++g) {
+    size_t seps = 0;
+    for (size_t i = 0, next = 0; i < LEN; ++i) {
+      s[i] = i == next ? ',' : 'x';
+      if (i == next) { // the next one 1 .. 2 * gap - 1 bytes on
+        x ^= x << 13, x ^= x >> 17, x ^= x << 5;
+        next = i + 1 + x % (2 * (uint32_t)gaps[g] - 1);
+        ++seps;
+      }
+    }
+    snprintf(names[g], sizeof names[g], "split, ',' about every %d bytes",
+             gaps[g]);
+    group_begin(names[g], NS_PER_OP);
+    BENCH("in batches of 64", REPS * seps,
+          for (int r_ = 0; r_ < REPS; ++r_)
+              MADE_WITH(batched, faf_batch_split(&ctx, s, LEN, ',')));
+    BENCH("one at a time", REPS * seps,
+          for (int r_ = 0; r_ < REPS; ++r_)
+              MADE_WITH(single, faf_batch_split(&ctx, s, LEN, ',')));
+  }
+  group_end();
+}
 
 void bench_batch(void) {
   section("Batch calls", "%d CSV-like lines in one buffer; ns per line", NLINES);
@@ -137,10 +199,10 @@ void bench_batch(void) {
   const size_t n = NLINES;
   const faf_batch *b = lines_b;
 
-  group_begin("split into lines", NS_PER_OP);
-  BENCH("faf_batch_split (+ region)", n,
-        MADE(faf_batch_split(&ctx, buf, buf_len, '\n')));
-  BENCH("next_token loop", n, loop_split());
+  group_begin("split into lines (sparse)", NS_PER_OP);
+  bench_split('\n');
+  group_begin("split on ',' (dense)", NS_PER_OP);
+  bench_split(',');
 
   group_begin("contains \"ab\"", NS_PER_OP);
   BENCH("faf_batch_contains", n, sink += faf_batch_contains(b, "ab", 2, mask));
@@ -176,6 +238,7 @@ void bench_batch(void) {
   group_begin("copy into a new buffer", NS_PER_OP);
   BENCH("faf_batch_compact (+ region)", n, MADE(faf_batch_compact(&ctx, b)));
   BENCH("faf_batch_join with \\n", n, join(b));
+  bench_split_gaps();
   group_end();
 
   teardown();
