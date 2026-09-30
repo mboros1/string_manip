@@ -1,0 +1,321 @@
+{
+ "meta": {
+  "chip": "esp32",
+  "revision": "301",
+  "cores": "2",
+  "mhz": "240",
+  "idf": "v6.1",
+  "backend": "swar",
+  "runs": 5,
+  "pools": 4,
+  "slots": 4096,
+  "slot_bytes": 4,
+  "lines": 400,
+  "date": "2026-09-30T13:17:00",
+  "commit": "ca904813a74a",
+  "subject": "batch split: one pass, no count; the first separators pick batched or one-at-a-time search (FAF_TUNE_SPLIT_BATCH_GAP, defaults per backend from a gap sweep)",
+  "dirty": false,
+  "command": "make esp32_bench_record IDF_TARGET=esp32 BENCH_GROUPS=\"batch\"",
+  "note": "",
+  "machine": "esp32"
+ },
+ "rows": [
+  {
+   "section": "Batch calls",
+   "group": "split into lines (sparse)",
+   "label": "faf_batch_split (+ region)",
+   "value": 1710.0,
+   "unit": "ns/op",
+   "failed": false,
+   "note": ""
+  },
+  {
+   "section": "Batch calls",
+   "group": "split into lines (sparse)",
+   "label": "in batches of 64",
+   "value": 2432.5,
+   "unit": "ns/op",
+   "failed": false,
+   "note": ""
+  },
+  {
+   "section": "Batch calls",
+   "group": "split into lines (sparse)",
+   "label": "one at a time",
+   "value": 1710.0,
+   "unit": "ns/op",
+   "failed": false,
+   "note": ""
+  },
+  {
+   "section": "Batch calls",
+   "group": "split into lines (sparse)",
+   "label": "next_token loop",
+   "value": 1685.0,
+   "unit": "ns/op",
+   "failed": false,
+   "note": ""
+  },
+  {
+   "section": "Batch calls",
+   "group": "split on ',' (dense)",
+   "label": "faf_batch_split (+ region)",
+   "value": 3275.0,
+   "unit": "ns/op",
+   "failed": false,
+   "note": ""
+  },
+  {
+   "section": "Batch calls",
+   "group": "split on ',' (dense)",
+   "label": "in batches of 64",
+   "value": 3275.0,
+   "unit": "ns/op",
+   "failed": false,
+   "note": ""
+  },
+  {
+   "section": "Batch calls",
+   "group": "split on ',' (dense)",
+   "label": "one at a time",
+   "value": 5305.0,
+   "unit": "ns/op",
+   "failed": false,
+   "note": ""
+  },
+  {
+   "section": "Batch calls",
+   "group": "split on ',' (dense)",
+   "label": "next_token loop",
+   "value": 5177.5,
+   "unit": "ns/op",
+   "failed": false,
+   "note": ""
+  },
+  {
+   "section": "Batch calls",
+   "group": "contains \"ab\"",
+   "label": "faf_batch_contains",
+   "value": 2735.0,
+   "unit": "ns/op",
+   "failed": false,
+   "note": "in 2% of lines"
+  },
+  {
+   "section": "Batch calls",
+   "group": "contains \"ab\"",
+   "label": "faf_string_contains loop",
+   "value": 2812.5,
+   "unit": "ns/op",
+   "failed": false,
+   "note": ""
+  },
+  {
+   "section": "Batch calls",
+   "group": "contains \"zzz\" (no line)",
+   "label": "faf_batch_contains",
+   "value": 2797.5,
+   "unit": "ns/op",
+   "failed": false,
+   "note": ""
+  },
+  {
+   "section": "Batch calls",
+   "group": "contains \"zzz\" (no line)",
+   "label": "faf_string_contains loop",
+   "value": 2872.5,
+   "unit": "ns/op",
+   "failed": false,
+   "note": ""
+  },
+  {
+   "section": "Batch calls",
+   "group": "hash",
+   "label": "faf_batch_hash",
+   "value": 13072.5,
+   "unit": "ns/op",
+   "failed": false,
+   "note": ""
+  },
+  {
+   "section": "Batch calls",
+   "group": "hash",
+   "label": "faf_string_hash loop",
+   "value": 13210.0,
+   "unit": "ns/op",
+   "failed": false,
+   "note": ""
+  },
+  {
+   "section": "Batch calls",
+   "group": "lower case copy",
+   "label": "faf_batch_ascii_case (one pass, + region)",
+   "value": 1455.0,
+   "unit": "ns/op",
+   "failed": false,
+   "note": ""
+  },
+  {
+   "section": "Batch calls",
+   "group": "lower case copy",
+   "label": "faf_k_ascii_case loop",
+   "value": 2790.0,
+   "unit": "ns/op",
+   "failed": false,
+   "note": ""
+  },
+  {
+   "section": "Batch calls",
+   "group": "count ',' per line",
+   "label": "faf_batch_count",
+   "value": 2480.0,
+   "unit": "ns/op",
+   "failed": false,
+   "note": ""
+  },
+  {
+   "section": "Batch calls",
+   "group": "find \"ab\" per line",
+   "label": "faf_batch_find",
+   "value": 2682.5,
+   "unit": "ns/op",
+   "failed": false,
+   "note": ""
+  },
+  {
+   "section": "Batch calls",
+   "group": "select by mask (views only, + region)",
+   "label": "faf_batch_select",
+   "value": 82.5,
+   "unit": "ns/op",
+   "failed": false,
+   "note": ""
+  },
+  {
+   "section": "Batch calls",
+   "group": "copy into a new buffer",
+   "label": "faf_batch_compact (+ region)",
+   "value": 855.0,
+   "unit": "ns/op",
+   "failed": false,
+   "note": ""
+  },
+  {
+   "section": "Batch calls",
+   "group": "copy into a new buffer",
+   "label": "faf_batch_join with \\n",
+   "value": 730.0,
+   "unit": "ns/op",
+   "failed": false,
+   "note": ""
+  },
+  {
+   "section": "Batch calls",
+   "group": "split, ',' about every 8 bytes",
+   "label": "in batches of 64",
+   "value": 302.6,
+   "unit": "ns/op",
+   "failed": false,
+   "note": ""
+  },
+  {
+   "section": "Batch calls",
+   "group": "split, ',' about every 8 bytes",
+   "label": "one at a time",
+   "value": 654.1,
+   "unit": "ns/op",
+   "failed": false,
+   "note": ""
+  },
+  {
+   "section": "Batch calls",
+   "group": "split, ',' about every 16 bytes",
+   "label": "in batches of 64",
+   "value": 488.5,
+   "unit": "ns/op",
+   "failed": false,
+   "note": ""
+  },
+  {
+   "section": "Batch calls",
+   "group": "split, ',' about every 16 bytes",
+   "label": "one at a time",
+   "value": 758.4,
+   "unit": "ns/op",
+   "failed": false,
+   "note": ""
+  },
+  {
+   "section": "Batch calls",
+   "group": "split, ',' about every 32 bytes",
+   "label": "in batches of 64",
+   "value": 825.6,
+   "unit": "ns/op",
+   "failed": false,
+   "note": ""
+  },
+  {
+   "section": "Batch calls",
+   "group": "split, ',' about every 32 bytes",
+   "label": "one at a time",
+   "value": 928.3,
+   "unit": "ns/op",
+   "failed": false,
+   "note": ""
+  },
+  {
+   "section": "Batch calls",
+   "group": "split, ',' about every 64 bytes",
+   "label": "in batches of 64",
+   "value": 1509.6,
+   "unit": "ns/op",
+   "failed": false,
+   "note": ""
+  },
+  {
+   "section": "Batch calls",
+   "group": "split, ',' about every 64 bytes",
+   "label": "one at a time",
+   "value": 1275.2,
+   "unit": "ns/op",
+   "failed": false,
+   "note": ""
+  },
+  {
+   "section": "Batch calls",
+   "group": "split, ',' about every 128 bytes",
+   "label": "in batches of 64",
+   "value": 2815.0,
+   "unit": "ns/op",
+   "failed": false,
+   "note": ""
+  },
+  {
+   "section": "Batch calls",
+   "group": "split, ',' about every 128 bytes",
+   "label": "one at a time",
+   "value": 1949.2,
+   "unit": "ns/op",
+   "failed": false,
+   "note": ""
+  },
+  {
+   "section": "Batch calls",
+   "group": "split, ',' about every 256 bytes",
+   "label": "in batches of 64",
+   "value": 4438.4,
+   "unit": "ns/op",
+   "failed": false,
+   "note": ""
+  },
+  {
+   "section": "Batch calls",
+   "group": "split, ',' about every 256 bytes",
+   "label": "one at a time",
+   "value": 2946.3,
+   "unit": "ns/op",
+   "failed": false,
+   "note": ""
+  }
+ ]
+}

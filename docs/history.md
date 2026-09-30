@@ -397,7 +397,23 @@ binding can override them. Tuning changes speed, never results; a test runs
 the case checks under random values. The first key is lower case's one-pass
 threshold (it was a constant); if the layout it picks doesn't fit the region,
 the other one is tried, so a tuning can't decide whether there is a result.
-The split key waits for measurements of the split strategies.
+
+Split no longer counts first (`ca90481`): the separators' positions grow in
+one reservation, in place, and the starts are written after them. It finds
+the first 16 separators one at a time, and their spacing picks how to find
+the rest: in batches of 64 per scan, or still one at a time
+(`FAF_TUNE_SPLIT_BATCH_GAP`). A sweep of the average gap put the crossover at
+about 48 bytes on the ESP32, 128 on the S3, and beyond 256 on the M1, so
+those are the defaults. Recorded at `ca90481`, ns per line:
+
+| | lines, before | lines | commas: batches / one at a time |
+|---|---|---|---|
+| ESP32 | 4,388 | 1,710 (one at a time) | 3,275 / 5,305 |
+| ESP32-S3 | | 1,180 (batches) | 1,885 / 3,998 |
+| M1 | | 13.4 (batches) | 44.6 / 99.3 |
+
+On the ESP32 the batch split went from 2.6x slower than a `next_token` loop
+to even with it, and on dense commas it is 1.6x faster.
 
 ## Lessons
 
