@@ -14,34 +14,35 @@
 
 static char *buf;
 static size_t buf_len;
-static char *arena_buf;
-static faf_arena *arena;
+// Two arenas of one pool each, sized for what they hold (an arena's pools are
+// all one size): the input's views, and one result at a time.
+static char *in_buf, *out_buf;
+static faf_arena in_arena, out_arena;
 static faf_region in_r;    // holds the input, split once
 static faf_batch *lines_b;
 static const int64_t *starts, *ends;
 static int64_t *out64;
 static uint8_t *mask;
 static uint64_t *hashes;
-static char *dst;
 
-// Two pools: one holds the split input, the other each result in turn (a
-// region acquired and released per call). False if there isn't memory.
+// False if there isn't memory (small boards).
 static bool setup(void) {
   buf_len = 0;
   for (int i = 0; i < NLINES; ++i)
     buf_len += line_lens[i] + 1;
   size_t n = NLINES;
-  size_t pool = buf_len + 2 * (n + 1) * sizeof(int64_t) + 1024; // bytes
-  size_t arena_bytes = faf_arena_bytes(2, pool / FAF_SLOT_BYTES + 1);
+  size_t views = 2 * (n + 1) * sizeof(int64_t) + 512; // bytes
+  size_t in_bytes = faf_arena_bytes(1, views / FAF_SLOT_BYTES + 1);
+  size_t out_bytes = faf_arena_bytes(1, (buf_len + views) / FAF_SLOT_BYTES + 1);
   buf = malloc(buf_len);
-  arena_buf = malloc(arena_bytes);
-  arena = malloc(faf_arena_size());
+  in_buf = malloc(in_bytes);
+  out_buf = malloc(out_bytes);
   out64 = malloc(n * sizeof *out64);
   mask = malloc(n);
   hashes = malloc(n * sizeof *hashes);
-  dst = malloc(buf_len + 1);
-  if (!buf || !arena_buf || !arena || !out64 || !mask || !hashes || !dst ||
-      !faf_arena_init(arena, arena_buf, arena_bytes, 2))
+  if (!buf || !in_buf || !out_buf || !out64 || !mask || !hashes ||
+      !faf_arena_init(&in_arena, in_buf, in_bytes, 1) ||
+      !faf_arena_init(&out_arena, out_buf, out_bytes, 1))
     return false;
   size_t at = 0;
   for (int i = 0; i < NLINES; ++i) {
@@ -50,7 +51,7 @@ static bool setup(void) {
     buf[at++] = '\n';
   }
   buf_len = at - 1; // no trailing newline: exactly NLINES pieces
-  in_r = faf_arena_acquire(arena);
+  in_r = faf_arena_acquire(&in_arena);
   lines_b = faf_batch_split(in_r, buf, buf_len, '\n');
   starts = faf_batch_starts(lines_b);
   ends = faf_batch_ends(lines_b);
@@ -59,8 +60,14 @@ static bool setup(void) {
 
 static void teardown(void) {
   faf_region_release(in_r);
-  free(buf), free(arena_buf), free(arena), free(out64), free(mask);
-  free(hashes), free(dst);
+  free(buf), free(in_buf), free(out_buf), free(out64), free(mask);
+  free(hashes);
+}
+
+// Room for `bytes` in a region of the result arena (the caller releases it).
+static char *scratch(faf_region *r, size_t bytes) {
+  *r = faf_arena_acquire(&out_arena);
+  return (char *)faf_reserve(*r, bytes / FAF_SLOT_BYTES + 1).ptr;
 }
 
 static faf_string line_at(size_t i) {
@@ -92,6 +99,8 @@ static void loop_hash(void) {
 }
 
 static void loop_lower(void) {
+  faf_region r;
+  char *dst = scratch(&r, buf_len);
   int64_t at = 0;
   for (size_t i = 0; i < NLINES; ++i) {
     size_t len = (size_t)(ends[i] - starts[i]);
@@ -99,13 +108,20 @@ static void loop_lower(void) {
     at += (int64_t)len;
   }
   sink += (size_t)at;
+  faf_region_release(r);
+}
+
+static void join(const faf_batch *b) {
+  faf_region r;
+  sink += (size_t)faf_batch_join(b, "\n", 1, scratch(&r, buf_len));
+  faf_region_release(r);
 }
 
 // A batch call that makes a new one, in a region taken and released around
 // it, as a caller doing one step of work would.
 #define MADE(call)                                                             \
   do {                                                                         \
-    faf_region r = faf_arena_acquire(arena);                                   \
+    faf_region r = faf_arena_acquire(&out_arena);                              \
     sink += faf_batch_len(call);                                               \
     faf_region_release(r);                                                     \
   } while (0)
@@ -159,8 +175,7 @@ void bench_batch(void) {
   BENCH("faf_batch_select", n, MADE(faf_batch_select(r, b, mask)));
   group_begin("copy into a new buffer", NS_PER_OP);
   BENCH("faf_batch_compact (+ region)", n, MADE(faf_batch_compact(r, b)));
-  BENCH("faf_batch_join with \\n", n,
-        sink += (size_t)faf_batch_join(b, "\n", 1, dst));
+  BENCH("faf_batch_join with \\n", n, join(b));
   group_end();
 
   teardown();
