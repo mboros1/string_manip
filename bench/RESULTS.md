@@ -40,6 +40,7 @@ Apple M1 Max, Darwin 25.0.0, Apple clang version 17.0.0 (clang-1700.6.4.2)
 | 2026-09-29 `e14f0c22c` test_faf_batch: buffers on the heap per test; static ones le | neon | 104 | 311 | 56.0 | 122 | 67.0 | 73.1 | 75.3 | 9,928 | 768 |
 | 2026-09-29 `dcbad6ccd` ascii_case: NEON/SSE2 64 bytes per iteration and word paths  | neon | 99.5 | 315 | 56.5 | 122 | 67.4 | 72.2 | 68.2 | 9,822 | 766 |
 | 2026-09-29 `5f01155c5` faf_batch: same-layout case conversion (span, range) and in  | neon | 97.4 | 306 | 55.9 | 122 | 66.0 | 71.7 | 67.9 | 9,914 | 764 |
+| 2026-09-30 `b1ee33f0b` bench_batch: two arenas sized for what they hold, scratch fr | neon | 97.3 | 313 | 56.8 | 123 | 67.2 | 71.5 | 68.0 | 9,892 | 768 |
 
 **Kernels, MB/s (higher is better)**
 
@@ -54,6 +55,7 @@ Apple M1 Max, Darwin 25.0.0, Apple clang version 17.0.0 (clang-1700.6.4.2)
 | 2026-09-29 `e14f0c22c` test_faf_batch: buffers on the heap per test; static ones le | neon | 61,830 | 24,920 | 42,280 | 31,060 | 8,530 | 10,690 |
 | 2026-09-29 `dcbad6ccd` ascii_case: NEON/SSE2 64 bytes per iteration and word paths  | neon | 61,830 | 24,920 | 42,280 | 31,060 | 8,550 | 41,350 |
 | 2026-09-29 `5f01155c5` faf_batch: same-layout case conversion (span, range) and in  | neon | 61,830 | 24,920 | 42,280 | 30,990 | 8,540 | 41,350 |
+| 2026-09-30 `b1ee33f0b` bench_batch: two arenas sized for what they hold, scratch fr | neon | 61,830 | 24,920 | 42,420 | 30,990 | 8,550 | 41,350 |
 
 ## esp32
 
@@ -73,6 +75,7 @@ esp32 rev 301, 240 MHz, ESP-IDF v6.1
 | 2026-09-29 `ab244f556` esp32 bench: faf_batch and bench_batch in IRAM like the rest | swar | 7,738 | 63,438 | 4,460 | 5,815 | 5,105 | 5,275 | 7,442 | 720,770 | 110,546 |
 | 2026-09-29 `dcbad6ccd` ascii_case: NEON/SSE2 64 bytes per iteration and word paths  | swar | 7,552 | 63,432 | 4,458 | 5,815 | 5,105 | 5,275 | 6,028 | 720,770 | 110,548 |
 | 2026-09-29 `5f01155c5` faf_batch: same-layout case conversion (span, range) and in  | swar | 7,552 | 69,785 | 4,460 | 5,815 | 5,102 | 5,275 | 6,028 | 720,768 | 110,548 |
+| 2026-09-30 `b1ee33f0b` bench_batch: two arenas sized for what they hold, scratch fr | swar | 7,568 | 73,038 | 4,462 | 5,815 | 5,102 | 5,282 | 6,028 | 720,760 | 110,538 |
 
 **Kernels, MB/s (higher is better)**
 
@@ -88,6 +91,7 @@ esp32 rev 301, 240 MHz, ESP-IDF v6.1
 | 2026-09-29 `ab244f556` esp32 bench: faf_batch and bench_batch in IRAM like the rest | swar | 101 | 56.4 | 119 | 59.9 | 19.2 | 38.3 |
 | 2026-09-29 `dcbad6ccd` ascii_case: NEON/SSE2 64 bytes per iteration and word paths  | swar | 101 | 56.4 | 119 | 59.9 | 19.2 | 76.4 |
 | 2026-09-29 `5f01155c5` faf_batch: same-layout case conversion (span, range) and in  | swar | 101 | 56.4 | 119 | 59.9 | 19.2 | 76.4 |
+| 2026-09-30 `b1ee33f0b` bench_batch: two arenas sized for what they hold, scratch fr | swar | 101 | 56.4 | 119 | 59.9 | 19.2 | 76.4 |
 
 ## esp32s3
 
@@ -117,6 +121,7 @@ esp32s3 rev 2, 240 MHz, ESP-IDF v6.1
 | 2026-09-29 `ab244f556` esp32 bench: faf_batch and bench_batch in IRAM like the rest | pie | 6,015 | 45,828 | 2,968 | 4,380 | 3,465 | 3,782 | 6,681 | 603,750 | 102,246 |
 | 2026-09-29 `dcbad6ccd` ascii_case: NEON/SSE2 64 bytes per iteration and word paths  | pie | 5,865 | 45,828 | 2,968 | 4,380 | 3,465 | 3,782 | 5,372 | 603,748 | 102,246 |
 | 2026-09-29 `5f01155c5` faf_batch: same-layout case conversion (span, range) and in  | pie | 5,865 | 45,830 | 2,970 | 4,380 | 3,465 | 3,782 | 5,372 | 603,748 | 102,246 |
+| 2026-09-30 `b1ee33f0b` bench_batch: two arenas sized for what they hold, scratch fr | pie | 5,880 | 45,812 | 2,972 | 4,378 | 3,465 | 3,790 | 5,375 | 603,744 | 102,242 |
 
 **Kernels, MB/s (higher is better)**
 
@@ -142,3 +147,4 @@ esp32s3 rev 2, 240 MHz, ESP-IDF v6.1
 | 2026-09-29 `ab244f556` esp32 bench: faf_batch and bench_batch in IRAM like the rest | pie | 724 | 964 | 715 | 411 | 21.8 | 39.9 |
 | 2026-09-29 `dcbad6ccd` ascii_case: NEON/SSE2 64 bytes per iteration and word paths  | pie | 724 | 964 | 716 | 411 | 21.8 | 79.6 |
 | 2026-09-29 `5f01155c5` faf_batch: same-layout case conversion (span, range) and in  | pie | 724 | 964 | 715 | 411 | 21.8 | 79.6 |
+| 2026-09-30 `b1ee33f0b` bench_batch: two arenas sized for what they hold, scratch fr | pie | 725 | 964 | 716 | 411 | 21.8 | 79.6 |
