@@ -1,5 +1,5 @@
 #include "faf_string_concat.h"
-#include "faf_string_mem.h"
+#include "../mem/faf_string_mem.h"
 
 faf_string faf_string_concat(faf_region r, faf_string str1, faf_string str2) {
   size_t len1 = faf_string_len(str1);

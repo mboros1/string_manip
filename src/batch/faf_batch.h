@@ -2,7 +2,7 @@
 #define FAF_BATCH_H
 
 #include "faf_ctx.h"
-#include "faf_string_mem.h"
+#include "../mem/faf_string_mem.h"
 
 #include <stddef.h>
 #include <stdint.h>

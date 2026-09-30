@@ -1,7 +1,7 @@
-#include "faf_string.h"
-#include "faf_string_arr.h"
-#include "faf_string_concat.h"
-#include "faf_string_mem.h"
+#include "core/faf_string.h"
+#include "core/faf_string_arr.h"
+#include "text/faf_string_concat.h"
+#include "mem/faf_string_mem.h"
 #include "faf_test.h"
 
 #include <stdio.h>

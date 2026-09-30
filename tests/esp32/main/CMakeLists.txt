@@ -1,6 +1,6 @@
 set(ROOT ${CMAKE_CURRENT_LIST_DIR}/../../..)
 
-file(GLOB LIB_SRCS ${ROOT}/src/*.c ${ROOT}/src/kernels/*.c)
+file(GLOB LIB_SRCS ${ROOT}/src/*/*.c)
 file(GLOB TEST_SRCS ${ROOT}/tests/test_*.c)
 list(SORT TEST_SRCS)
 

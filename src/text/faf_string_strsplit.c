@@ -1,6 +1,6 @@
 #include "faf_string_strsplit.h"
-#include "kernels/faf_kernels.h"
-#include "faf_string_mem.h"
+#include "../kernels/faf_kernels.h"
+#include "../mem/faf_string_mem.h"
 
 // 2024-07-22:
 // I think my general strategy will be to just find the start/end of

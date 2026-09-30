@@ -1,8 +1,8 @@
 #ifndef FAF_STRING_MEM_H
 #define FAF_STRING_MEM_H
 
-#include "faf_backend.h"
-#include "faf_string.h"
+#include "../core/faf_backend.h"
+#include "../core/faf_string.h"
 
 #include <stdbool.h>
 #include <stdint.h>

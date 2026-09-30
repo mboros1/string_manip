@@ -26,7 +26,8 @@ endif
 
 # Directories
 SRC_DIR = src
-KERNEL_DIR = $(SRC_DIR)/kernels
+# The library's subsystems (see docs/api.md)
+LIB_DIRS = $(addprefix $(SRC_DIR)/,core mem text batch kernels)
 TEST_DIR = tests
 BENCH_DIR = bench
 TOOLS_DIR = tools
@@ -38,11 +39,11 @@ BIN_DIR = bin
 INCLUDES = -I$(SRC_DIR)
 
 # Sources are found by name in these directories; objects all go in OBJ_DIR
-vpath %.c $(SRC_DIR) $(KERNEL_DIR) $(TEST_DIR) $(TOOLS_DIR)
+vpath %.c $(LIB_DIRS) $(TEST_DIR) $(TOOLS_DIR)
 
 # Library
-LIB_SRCS = $(wildcard $(SRC_DIR)/*.c $(KERNEL_DIR)/*.c)
-LIB_HEADERS = $(wildcard $(SRC_DIR)/*.h $(KERNEL_DIR)/*.h)
+LIB_SRCS = $(wildcard $(addsuffix /*.c,$(LIB_DIRS)))
+LIB_HEADERS = $(wildcard $(SRC_DIR)/*.h $(addsuffix /*.h,$(LIB_DIRS)))
 LIB_OBJS = $(patsubst %.c,$(OBJ_DIR)/%.o,$(notdir $(LIB_SRCS)))
 LIB = $(OBJ_DIR)/libfaf.a
 

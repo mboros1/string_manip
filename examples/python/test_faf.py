@@ -39,7 +39,7 @@ M64 = (1 << 64) - 1
 
 
 def ref_hash(b, seed):
-    """faf_string_hash_seed (src/faf_string_hash.c), in Python."""
+    """faf_string_hash_seed (src/text/faf_string_hash.c), in Python."""
     k1, k2 = 0x9E3779B97F4A7C15, 0xC2B2AE3D27D4EB4F
 
     def fmix(k):

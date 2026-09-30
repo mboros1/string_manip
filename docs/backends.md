@@ -3,7 +3,7 @@
 All architecture-specific code is a small set of byte kernels
 (`src/kernels/faf_kernels.h`): find, count, strlen, compare, case conversion
 and so on. The rest of the library is portable C that calls them. The backend
-is chosen at compile time (`src/faf_backend.h`):
+is chosen at compile time (`src/core/faf_backend.h`):
 
 | Backend | When | How |
 |---|---|---|

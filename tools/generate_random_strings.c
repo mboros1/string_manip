@@ -2,7 +2,7 @@
 #include <stdlib.h>
 #include <time.h>
 
-#include "faf_string_mem.h"
+#include "mem/faf_string_mem.h"
 
 // Function to generate a random alphanumeric character
 char get_random_char() {

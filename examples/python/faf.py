@@ -1,4 +1,4 @@
-"""FaF strings from Python: a ctypes shim over the batch API (src/faf_batch.h).
+"""FaF strings from Python: a ctypes shim over the batch API (src/batch/faf_batch.h).
 
 It keeps the library's model: work happens in a region, and everything made
 there goes when the region is released.

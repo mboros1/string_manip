@@ -1,9 +1,9 @@
 #ifndef FAF_STRING_SORT_H
 #define FAF_STRING_SORT_H
 
-#include "faf_string.h"
-#include "faf_string_arr.h"
-#include "faf_string_mem.h"
+#include "../core/faf_string.h"
+#include "../core/faf_string_arr.h"
+#include "../mem/faf_string_mem.h"
 
 // The bytes of `str` in ascending (unsigned) order, allocated in `r`.
 // Counting sort. Runtime Complexity: O(n) Memory Complexity: O(n)

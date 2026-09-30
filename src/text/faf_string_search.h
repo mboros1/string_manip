@@ -1,7 +1,7 @@
 #ifndef FAF_STRING_SEARCH_H
 #define FAF_STRING_SEARCH_H
 
-#include "faf_string.h"
+#include "../core/faf_string.h"
 
 // Searching. Nothing here allocates; indices are byte offsets into `str`, and
 // FAF_NPOS means not found. An empty `sub` matches at every position, as in

@@ -1,8 +1,8 @@
 #ifndef FAF_STRING_CASE_H
 #define FAF_STRING_CASE_H
 
-#include "faf_string.h"
-#include "faf_string_mem.h"
+#include "../core/faf_string.h"
+#include "../mem/faf_string_mem.h"
 
 // ASCII case operations. Bytes outside 'A'-'Z' / 'a'-'z' are left unchanged;
 // the library works on bytes, not Unicode.

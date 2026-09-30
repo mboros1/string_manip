@@ -1,6 +1,6 @@
 set(ROOT ${CMAKE_CURRENT_LIST_DIR}/../../..)
 
-file(GLOB LIB_SRCS ${ROOT}/src/*.c ${ROOT}/src/kernels/*.c)
+file(GLOB LIB_SRCS ${ROOT}/src/*/*.c)
 # The io group needs a file system and is left out (FAF_BENCH_HAVE_FILES)
 set(BENCH_SRCS ${ROOT}/bench/bench_faf_string.c ${ROOT}/bench/bench_common.c
                ${ROOT}/bench/bench_alloc.c ${ROOT}/bench/bench_batch.c)

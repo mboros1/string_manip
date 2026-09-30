@@ -1,9 +1,9 @@
 #ifndef FAF_STRING_STRSPLIT_H
 #define FAF_STRING_STRSPLIT_H
 
-#include "faf_string.h"
-#include "faf_string_arr.h"
-#include "faf_string_mem.h"
+#include "../core/faf_string.h"
+#include "../core/faf_string_arr.h"
+#include "../mem/faf_string_mem.h"
 
 // Split a string into an array of strings on the provided seperator.
 // `r` is the region in which to allocate the return array.

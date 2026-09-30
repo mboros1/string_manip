@@ -1,8 +1,8 @@
 #ifndef FAF_STRING_PARSE_H
 #define FAF_STRING_PARSE_H
 
-#include "faf_string.h"
-#include "faf_string_mem.h"
+#include "../core/faf_string.h"
+#include "../mem/faf_string_mem.h"
 
 #include <stdint.h>
 

@@ -27,7 +27,11 @@ Functions that allocate take a `faf_region` (batch calls: a `faf_ctx` holding on
 
 | Directory | What's in it |
 |---|---|
-| `src/` | the library: sources and headers together |
+| `src/` | the library, sources and headers together; `faf.h` includes it all |
+| `src/core/` | the `faf_string` type, `faf_string_arr`, strlen, the backend choice |
+| `src/mem/` | arenas and regions, the string ring |
+| `src/text/` | per-string operations: views, search, compare, case, hash, building, split, parse, sort |
+| `src/batch/` | many strings per call for bindings, and `faf_ctx` |
 | `src/kernels/` | the per-architecture byte kernels ([backends.md](backends.md)) |
 | `tests/` | one test program per module, and the test framework |
 | `tests/esp32/` | an ESP-IDF app that runs every test suite on an ESP32 (`make esp32_test`) |
@@ -36,4 +40,4 @@ Functions that allocate take a `faf_region` (batch calls: a `faf_ctx` holding on
 | `experiments/` | standalone experiments, not part of the library (the simde ones, a C port of pdqsort) |
 
 
-To use the library, compile `src/*.c` and `src/kernels/*.c` (no include paths needed) and add `-Isrc` to your own code.
+To use the library, compile `src/*/*.c` (no include paths needed) and add `-Isrc` to your own code: `#include "faf.h"`, or one header by its path, e.g. `"mem/faf_string_mem.h"`.

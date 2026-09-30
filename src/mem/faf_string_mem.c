@@ -1,5 +1,5 @@
 #include "faf_string_mem.h"
-#include "kernels/faf_kernels.h"
+#include "../kernels/faf_kernels.h"
 
 /* 2024-07-23
  * This defines the global dynamic allocator for the FAF string library.

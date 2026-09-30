@@ -4,7 +4,7 @@
 // outside the pages a range touches crashes the test).
 
 #include "kernels/faf_kernels.h"
-#include "faf_string_mem.h"
+#include "mem/faf_string_mem.h"
 #include "faf_test.h"
 
 #include <stdio.h>

@@ -1,7 +1,7 @@
-#include "faf_string.h"
-#include "faf_string_mem.h"
-#include "faf_string_case.h"
-#include "faf_string_cmp.h"
+#include "core/faf_string.h"
+#include "mem/faf_string_mem.h"
+#include "text/faf_string_case.h"
+#include "text/faf_string_cmp.h"
 #include "faf_test.h"
 
 #include <ctype.h>

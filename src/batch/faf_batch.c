@@ -1,9 +1,9 @@
 #include "faf_batch.h"
-#include "faf_string.h"
-#include "faf_string_case.h"
-#include "faf_string_hash.h"
-#include "faf_string_search.h"
-#include "kernels/faf_kernels.h"
+#include "../core/faf_string.h"
+#include "../text/faf_string_case.h"
+#include "../text/faf_string_hash.h"
+#include "../text/faf_string_search.h"
+#include "../kernels/faf_kernels.h"
 
 /* 2026-09-29
  * Many strings per call, for foreign function interfaces. Each string becomes

@@ -1,5 +1,5 @@
-#include "faf_string.h"
-#include "faf_string_strlen.h"
+#include "core/faf_string.h"
+#include "core/faf_string_strlen.h"
 #include "faf_test.h"
 
 #include <stdio.h>

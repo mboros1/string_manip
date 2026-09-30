@@ -1,6 +1,6 @@
-#include "faf_string.h"
-#include "faf_string_case.h"
-#include "faf_string_mem.h"
+#include "core/faf_string.h"
+#include "text/faf_string_case.h"
+#include "mem/faf_string_mem.h"
 #include "faf_test.h"
 
 #include <stdio.h>

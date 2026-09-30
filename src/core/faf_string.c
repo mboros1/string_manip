@@ -1,5 +1,5 @@
 #include "faf_string.h"
-#include "kernels/faf_kernels.h"
+#include "../kernels/faf_kernels.h"
 
 faf_string faf_string_init(const char *str) {
   faf_string init = {.start = str, .end = str + faf_k_strlen(str)};

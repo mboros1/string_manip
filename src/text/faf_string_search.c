@@ -1,5 +1,5 @@
 #include "faf_string_search.h"
-#include "kernels/faf_kernels.h"
+#include "../kernels/faf_kernels.h"
 
 bool faf_string_eq(faf_string a, faf_string b) {
   size_t len = faf_string_len(a);

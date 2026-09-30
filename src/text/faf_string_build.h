@@ -1,9 +1,9 @@
 #ifndef FAF_STRING_BUILD_H
 #define FAF_STRING_BUILD_H
 
-#include "faf_string.h"
-#include "faf_string_arr.h"
-#include "faf_string_mem.h"
+#include "../core/faf_string.h"
+#include "../core/faf_string_arr.h"
+#include "../mem/faf_string_mem.h"
 
 #include <stdarg.h>
 #include <stdint.h>

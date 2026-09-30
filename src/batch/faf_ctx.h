@@ -1,7 +1,7 @@
 #ifndef FAF_CTX_H
 #define FAF_CTX_H
 
-#include "faf_string_mem.h"
+#include "../mem/faf_string_mem.h"
 
 #include <stdbool.h>
 #include <stdint.h>

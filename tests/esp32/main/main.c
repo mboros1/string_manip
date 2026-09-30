@@ -2,7 +2,7 @@
 // Each test file's main() is renamed <file>_main at compile time (see
 // CMakeLists.txt); tools/esp32_run.py watches for the FAF_TESTS_* lines.
 
-#include "faf_string_mem.h"
+#include "mem/faf_string_mem.h"
 #include "faf_test.h"
 
 #include "freertos/FreeRTOS.h"

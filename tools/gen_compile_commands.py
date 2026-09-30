@@ -12,7 +12,8 @@ SIMDE_FILES = {"str_len_test.c", "str_split_test.c", "ffs_find_index_example.c"}
 simde_include = os.popen("brew --prefix simde").read().strip() + "/include"
 
 # The library needs no include paths; everything else includes it via src/
-DIRS = ["src", "src/kernels", "tests", "bench", "tools", "experiments"]
+DIRS = ["src/core", "src/mem", "src/text", "src/batch", "src/kernels",
+        "tests", "bench", "tools", "experiments"]
 
 compile_commands = []
 

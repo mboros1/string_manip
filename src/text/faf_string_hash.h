@@ -1,7 +1,7 @@
 #ifndef FAF_STRING_HASH_H
 #define FAF_STRING_HASH_H
 
-#include "faf_string.h"
+#include "../core/faf_string.h"
 
 #include <stdint.h>
 

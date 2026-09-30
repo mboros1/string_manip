@@ -1,5 +1,5 @@
 #include "faf_string_case.h"
-#include "kernels/faf_kernels.h"
+#include "../kernels/faf_kernels.h"
 
 static faf_string convert(faf_region r, faf_string str, bool upper) {
   size_t len = faf_string_len(str);

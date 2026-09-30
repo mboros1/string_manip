@@ -1,7 +1,7 @@
 # Python example
 
 FaF from Python through `ctypes`: the batch API
-([`src/faf_batch.h`](../../src/faf_batch.h)) and a page of declarations. Only
+([`src/batch/faf_batch.h`](../../src/batch/faf_batch.h)) and a page of declarations. Only
 the standard library is needed; numpy and pyarrow are used for conversions
 when installed. It is an example of how small a binding can be, not a
 package: the same declarations work from any language that can call C.
