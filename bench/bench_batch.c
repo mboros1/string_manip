@@ -31,8 +31,8 @@ static bool setup(void) {
   for (int i = 0; i < NLINES; ++i)
     buf_len += line_lens[i] + 1;
   size_t n = NLINES;
-  size_t pool = buf_len + 2 * (n + 1) * sizeof(int64_t) + 1024;
-  size_t arena_bytes = faf_arena_bytes(2, pool);
+  size_t pool = buf_len + 2 * (n + 1) * sizeof(int64_t) + 1024; // bytes
+  size_t arena_bytes = faf_arena_bytes(2, pool / FAF_SLOT_BYTES + 1);
   buf = malloc(buf_len);
   arena_buf = malloc(arena_bytes);
   arena = malloc(faf_arena_size());
