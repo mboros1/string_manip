@@ -9,3 +9,6 @@ a.out.*
 .env
 test-explorer.log
 __pycache__/
+
+# Video plans and scripts: local only
+video/

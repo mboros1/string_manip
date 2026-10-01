@@ -427,7 +427,7 @@ paths (its files include each other relatively), and `faf.h` is where it was.
 
 ## Where it stands (09-30)
 
-The library as it is now was built in four days, 09-27 to 09-30, 107 commits
+The library as it is now was built in four days, 09-27 to 09-30, over 100 commits
 on top of a 2024 prototype: about 4,800 lines of library, 3,400 of tests and
 1,900 of benchmarks. Every suite passes on the M1 (NEON, SWAR, ref, small
 pools, freestanding), on x86-64 Linux in CI (SSE2), and on both boards; 50
